@@ -152,13 +152,13 @@ export const FloodSimulationView: React.FC = () => {
           <div className="bg-onyx-900 rounded border border-onyx-800 p-5 shadow-tactical space-y-4 font-mono text-xs">
             <div className="flex items-center justify-between pb-3 border-b border-onyx-800 text-storm-400">
               <span className="font-bold text-storm-200">TELEMETRY MONITOR</span>
-              <span className="text-[10px] text-emerald-400">REALTIME FEEDS</span>
+              <span className="text-[10px] text-amber-400">SYNTHETIC SENSOR FEEDS (SPEC)</span>
             </div>
 
             <div className="space-y-3">
               <div className="bg-onyx-950 p-3 rounded border border-onyx-800">
                 <div className="flex justify-between text-storm-400 text-[10px] mb-1">
-                  <span>NET SURFACE RUNOFF INFLOW</span>
+                  <span>SIMULATED HYDROGRAPH INFLOW</span>
                   <span className="text-storm-200 font-bold">14,250 m³/hr</span>
                 </div>
                 <div className="w-full bg-onyx-900 h-1.5 rounded overflow-hidden">
@@ -168,7 +168,7 @@ export const FloodSimulationView: React.FC = () => {
 
               <div className="bg-onyx-950 p-3 rounded border border-onyx-800">
                 <div className="flex justify-between text-storm-400 text-[10px] mb-1">
-                  <span>CULVERT DISCHARGE EFFICIENCY</span>
+                  <span>MODELED CULVERT EFFICIENCY</span>
                   <span className="text-amber-400 font-bold">78.4% (Nominal)</span>
                 </div>
                 <div className="w-full bg-onyx-900 h-1.5 rounded overflow-hidden">
@@ -178,7 +178,7 @@ export const FloodSimulationView: React.FC = () => {
 
               <div className="bg-onyx-950 p-3 rounded border border-onyx-800">
                 <div className="flex justify-between text-storm-400 text-[10px] mb-1">
-                  <span>HOSPITAL ACCESS ROAD WATER DEPTH</span>
+                  <span>PROJECTED WATER DEPTH</span>
                   <span className="text-emerald-400 font-bold">11.4 cm (Passable)</span>
                 </div>
                 <div className="w-full bg-onyx-900 h-1.5 rounded overflow-hidden">

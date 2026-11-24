@@ -66,11 +66,11 @@ export const OperationalTicketsView: React.FC = () => {
           <div className="flex items-center gap-2">
             <Ticket className="w-4 h-4 text-cyan-400" />
             <span className="font-bold text-storm-100 uppercase">
-              ACTIVE FIELD DISPATCH TICKETS ({tickets.length})
+              FIELD DISPATCH TICKET SCHEMA PREVIEW ({tickets.length})
             </span>
           </div>
           <span className="text-storm-500 text-[11px]">
-            ATLASSIAN JSM INTEGRATION READY
+            JSM REST CONTRACT SPECIFICATION
           </span>
         </div>
 

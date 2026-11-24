@@ -68,7 +68,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span className="font-bold text-storm-100 uppercase">
-              DECISION REGISTRY // {records.length} COMMITTED ENTRIES
+              DECISION REGISTRY SCHEMA // {records.length} COMMITTED SPEC ENTRIES
             </span>
           </div>
 
