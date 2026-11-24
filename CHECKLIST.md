@@ -24,8 +24,8 @@
 
 ## [x] Phase 1: Deterministic 64×64 Hydraulic Simulation Engine
 - [x] **1.1 Core Mathematical Model**: Implemented 2D mass-conserving staggered overland flow solver with adaptive CFL/diffusive sub-stepping in `src/simulation/hydraulicSolver.ts`.
-- [x] **1.2 Water Balance Test Suite**: Authored 10 independent verification tests in `tests/hydraulicSolver.test.ts` (mass balance error $< 10^{-10}$, cliff non-negativity, downhill flow, quiescent equilibrium, flat plane invariant, and stability under 250mm/hr cloudburst). All 10 tests passing.
-- [ ] **1.3 Bundled Real Catchment Dataset**: Package static elevation matrix and road/hospital vector network for Boston Longwood & Muddy River catchment (OpenStreetMap ODbL + USGS 3DEP LiDAR).
+- [x] **1.2 Water Balance Test Suite**: Authored 10 independent verification tests in `tests/hydraulicSolver.test.ts`, expanded to 17 tests covering numerical edge cases and mass conservation ($< 10^{-10}$). All 17 tests passing.
+- [x] **1.3 Bundled Real Catchment Dataset**: Packaged static 64×64 elevation matrix from USGS 3DEP 1m LiDAR and infrastructure vectors from OpenStreetMap (5 hospital complexes, 135 road segments) for Boston Longwood & Muddy River catchment in `src/data/bostonLongwoodCatchment.json`. Implemented `src/data/catchmentLoader.ts` with CRS metadata, coordinate conversions, and hydraulic solver adapter. Authored 8 automated tests in `tests/bostonDataset.test.ts` (total 25/25 tests passing). Documented authoritative provenance, licenses (ODbL 1.0, USGS Public Domain, NOAA Atlas 14), and fact vs. model boundaries in `BOSTON_DATASET_PROVENANCE.md`.
 - [ ] **1.4 Canvas Integration**: Connect simulation state array to the canvas visualizer and storm hydrograph scrubber.
 
 ---
