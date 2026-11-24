@@ -1,66 +1,84 @@
 /**
  * DELTA Design System Tokens
- * Strict adherence to 60/30/10 Rule:
- * 60% Storm Grey / Light Neutral Surface Accents
- * 30% Matte Onyx / Dark Structural Panels, Navigation & Technical Baselines
- * 10% Safety Orange / Operational Interventions & Flood Warnings
+ * Strict adherence to 60/30/10 Rule & Reviewer's Decision:
+ * 60% Storm Grey (#3C434B) / Technical Workspace Backgrounds
+ * 30% Matte Onyx (#14171A) / Panels, Map Frame, Structural Baseline
+ * 10% Safety Orange (#FF6B1A) / Actionable Decisions & Changed States ONLY
+ * Text: Bone (#E8E6E1)
+ * Map Data Only: Water Blues (#BFE3F0 to #1F7FA8 to #0F3F5E)
+ * Hazards: Cross-hatching & Map-Confined Tactical Red (#EF4444)
  */
 
 export const DELTA_TOKENS = {
   colors: {
-    // 60% Storm Grey & Neutral Slate
+    // 60% Storm Grey Background Base
     storm: {
+      bg: '#3C434B', // Core background
       50: '#F8FAFC',
-      100: '#F1F5F9',
-      200: '#E2E8F0',
-      300: '#CBD5E1',
-      400: '#94A3B8',
-      500: '#64748B',
-      600: '#475569',
-      700: '#334155',
+      100: '#E8E6E1', // Bone text
+      200: '#CBD5E1',
+      300: '#94A3B8',
+      400: '#64748B',
+      500: '#475569',
+      600: '#3C434B', // Main storm grey
+      700: '#2F353C',
     },
-    // 30% Matte Onyx (Structural Shell & Spatial Layout)
+    // 30% Matte Onyx (Structural Shell, Panels, Frame)
     onyx: {
-      950: '#0A0D12', // Background base
-      900: '#10151C', // Navigation, sidebar, header
-      850: '#161D27', // Cards, inspection panels
-      800: '#1E2734', // Panel dividers, structural borders
-      700: '#2A3648', // Interactive hover / active state borders
-      600: '#3B4B61', // Tertiary borders
+      panel: '#14171A', // Core matte onyx
+      950: '#0E1012',
+      900: '#14171A', // Panels, map-sheet frame, navigation
+      850: '#1C2126', // Cards, inspection panels
+      800: '#252B32', // Panel dividers, structural borders
+      700: '#343C46', // Interactive borders
+      600: '#444E5A',
     },
-    // 10% Safety Orange (Action, Replanning Trigger, Alert)
+    // 10% Safety Orange (Action & Changed State ONLY)
     safety: {
-      orange: '#FF5E1E',
-      hover: '#E04B0F',
-      dark: '#C23C07',
-      muted: 'rgba(255, 94, 30, 0.12)',
-      border: 'rgba(255, 94, 30, 0.35)',
-      glow: '0 0 15px rgba(255, 94, 30, 0.3)',
+      orange: '#FF6B1A',
+      hover: '#E55A0F',
+      dark: '#C74A08',
+      muted: 'rgba(255, 107, 26, 0.12)',
+      border: 'rgba(255, 107, 26, 0.35)',
+      glow: '0 0 15px rgba(255, 107, 26, 0.3)',
     },
-    // Hydrology & Environmental Accents
+    // Text Primary
+    text: {
+      bone: '#E8E6E1',
+      muted: '#94A3B8',
+      dim: '#64748B',
+    },
+    // Hydrology & Water Color Ramps (Map Only)
     hydro: {
-      500: '#0284C7',
-      600: '#0369A1',
-      muted: 'rgba(2, 132, 199, 0.12)',
-      border: 'rgba(2, 132, 199, 0.35)',
+      shallow: '#BFE3F0',
+      medium: '#1F7FA8',
+      deep: '#0F3F5E',
+      muted: 'rgba(31, 127, 168, 0.15)',
+      border: 'rgba(31, 127, 168, 0.4)',
     },
-    // Telemetry Status
+    // Operational & Map Hazard Status (Hazards = Red/Hatching, NOT Orange)
+    hazard: {
+      red: '#EF4444',
+      darkRed: '#991B1B',
+      border: 'rgba(239, 68, 68, 0.4)',
+    },
     status: {
       nominal: '#10B981', // Green
       warning: '#F59E0B', // Amber
-      critical: '#FF5E1E', // Safety Orange
-      offline: '#64748B', // Slate
+      critical: '#EF4444', // Red (Confined to hazards/impassable)
+      actionRequired: '#FF6B1A', // Safety Orange for actionable trigger
+      offline: '#64748B',
     }
   },
   typography: {
     display: 'font-display tracking-tight font-semibold',
     heading: 'font-display tracking-tight font-medium',
     mono: 'font-mono text-xs tracking-wider uppercase',
-    body: 'font-sans text-sm antialiased',
+    body: 'font-sans text-sm text-[#E8E6E1] antialiased',
   },
   elevation: {
-    panel: 'bg-onyx-900 border border-onyx-800 shadow-tactical',
-    card: 'bg-onyx-850 border border-onyx-800/80 shadow-tactical',
-    activeCard: 'bg-onyx-850 border border-safety-border shadow-safety',
+    panel: 'bg-[#14171A] border border-[#252B32] shadow-tactical',
+    card: 'bg-[#1C2126] border border-[#252B32]/80 shadow-tactical',
+    activeCard: 'bg-[#1C2126] border border-[#FF6B1A]/40 shadow-safety',
   }
 } as const;

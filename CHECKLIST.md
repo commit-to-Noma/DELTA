@@ -34,37 +34,43 @@
 ---
 
 ## [ ] Phase 2: Dynamic Disruption & In-Flight Replanning
-- [ ] **2.1 Disruption State Manager**: Model culvert debris blockages, road washouts, and pump failures.
-- [ ] **2.2 Live Recalculation Engine**: Recompute downstream water depths and hospital artery accessibility in real time when disruptions occur.
-- [ ] **2.3 Replanning Explanation Generator**: Formulate causal rationale detailing why recommendations shifted.
+- [ ] **2.1 Disruption State Manager**: Model culvert debris blockages (e.g. 80% loss of Muddy River gravity inlet capacity), emergency road closures, and localized pump failures with explicit before/after delta states.
+- [ ] **2.2 Live 2D Recalculation Engine**: Recompute downstream overland flood propagation and emergency hospital artery accessibility in real-time ($< 50\text{ms}$ sub-stepping) using the diffusive-wave solver.
+- [ ] **2.3 Causal Replanning Engine**: Automatically compute changes in critical hospital ingress/egress routes and generate clear, deterministic engineering justifications for why initial plans failed.
 
 ---
 
-## [ ] Phase 3: Intervention Planner & Fair Baseline Comparison
-- [ ] **3.1 Candidate Plan Scenarios**: Define structured mitigation interventions (sandbagging, culvert clearing, mobile pumps).
-- [ ] **3.2 Normalized Scoring Matrix**: Simulate every candidate against the identical baseline storm; compute delta inundation and ambulance delay metrics.
+## [ ] Phase 3: Multi-Scenario Intervention Planner & Fair Baseline Comparison
+- [ ] **3.1 Candidate Plan Scenarios**: Define structured mitigation interventions (Plan A: Sandbag dyking on Brookline Ave; Plan B: High-capacity mobile pumps discharging to Muddy River; Plan C: Emergency vacuum culvert jetting).
+- [ ] **3.2 Normalized Scoring Matrix**: Simulate every candidate intervention against the identical NOAA Atlas 14 baseline storm; compute quantitative metrics: avoided flood volume ($\text{m}^3$), ambulance response delay avoided ($\text{min}$), deployment hours, and equipment cost.
+- [ ] **3.3 Interactive Trade-Off Visualizer**: Multi-scenario comparison panel allowing the incident commander to toggle candidate interventions and inspect comparative water depth profiles.
 
 ---
 
-## [ ] Phase 4: Atlassian Rovo Agent Integration
-- [ ] **4.1 Tool Resolver Wiring**: Connect Rovo actions (`get-simulation-status`, `evaluate-interventions`) to the live simulation state.
-- [ ] **4.2 Causal Explanations**: Verify Rovo delivers plain-language physics explanations without hallucinating or overriding deterministic results.
+## [ ] Phase 4: Atlassian Rovo Agent & Teamwork Graph Integration
+- [ ] **4.1 Rovo Action Resolvers**: Connect Rovo actions (`get-simulation-status`, `evaluate-interventions`) to live simulation state in `src/resolvers/index.js`.
+- [ ] **4.2 Deterministic Physics Explanations**: Verify Rovo delivers explainable, plain-language hydraulic rationale (e.g. explaining why mobile pumping de-risks hospital access while sandbagging diverts water toward BIDMC East) without hallucinating numbers.
+- [ ] **4.3 Teamwork Graph API Querying**: Ingest and link critical medical facilities, municipal drainage infrastructure, and historical flood incident issues via Teamwork Graph in preview.
+- [ ] **4.4 Model Context Protocol (MCP) Tool Exposure**: Author `skill.md` and expose hydraulic solver inspection tools via Forge MCP for developer and agentic workflows.
 
 ---
 
-## [ ] Phase 5: Immutable Decision Records & Forge Storage
-- [ ] **5.1 Append-Only Ledger Schema**: Design cryptographic hash signature for decision blocks (storm parameters + chosen plan + authorizing officer).
-- [ ] **5.2 Forge Storage Persistence**: Persist Decision Records using `@forge/api` storage with browser fallback.
+## [ ] Phase 5: Append-Only Decision Records & Forge Storage
+- [ ] **5.1 Append-Only Ledger Schema**: Design auditable record schema (unique ID `DEC-XXXX`, scenario hash, baseline storm, chosen plan, physical metrics, human authorizing officer, timestamp) labelled "Append-only by application design".
+- [ ] **5.2 Forge KVS Storage Persistence**: Persist Decision Records using `@forge/api` Key-Value Storage (`storage.set`, `storage.get`) with zero external database dependencies for 100% data residency compliance.
+- [ ] **5.3 Human-in-the-Loop Approval Gate**: Implement strict human authorization step preventing autonomous execution; only an authorized incident commander can sign and commit a decision block.
 
 ---
 
-## [ ] Phase 6: Jira Service Management Field Dispatch
-- [ ] **6.1 JSM Issue Payload Generator**: Transform approved Decision Records into field dispatch tickets with coordinates and SLAs.
-- [ ] **6.2 Forge REST API Dispatcher**: Dispatch to JSM Service Desk API with `write:jira-work` scope.
+## [ ] Phase 6: Proactive Jira Workflow Gate, Issue Panel & JSM Field Dispatch
+- [ ] **6.1 Jira Issue Glance & Panel**: Add `jira:issuePanel` and `jira:issueGlance` to `manifest.yml` to display live flood risk, passability status, and active decision records directly inside Jira incident issues.
+- [ ] **6.2 Proactive Workflow Gate (Condition/Validator)**: Implement Forge Workflow Validator that actively blocks Jira incident transitions to `Dispatched` or `Resolved` unless an Approved Decision Record exists in Forge Storage.
+- [ ] **6.3 Jira Service Management Dispatcher**: Automatically generate field crew dispatch tickets in JSM containing exact EPSG:26986 & WGS84 coordinates, equipment requirements, and priority SLAs.
+- [ ] **6.4 Automated Confluence Incident Runbook**: Publish complete post-incident engineering runbook to Confluence via `requestConfluence` with full hydraulic telemetry, scenario comparison tables, and human sign-off audit trail.
 
 ---
 
-## [ ] Phase 7: Hackathon Deliverables & Video
-- [ ] **7.1 Video Walkthrough Script (< 5:00 min)**: Problem -> Single Storm -> Disruption Replan -> Human Approval -> JSM Ticket.
-- [ ] **7.2 Installation & Testing Instructions**: Zero-friction setup guide for Codegeist judges.
-- [ ] **7.3 Devpost Submission Copy**: Complete submission text covering all 5 judging criteria.
+## [ ] Phase 7: Hackathon Video, Testing Sandbox Guide & Devpost Submission
+- [ ] **7.1 "Golden Journey" Demo Video (< 5:00 min)**: Produce high-energy, narrative-driven video demonstrating the complete crisis cycle (Pre-storm baseline -> Culvert blockage -> Real-time solver replan -> Multi-scenario comparison -> Rovo audit -> Human approval -> Proactive workflow gate -> JSM dispatch -> Confluence runbook).
+- [ ] **7.2 Zero-Friction Testing Sandbox Guide**: Comprehensive walkthrough for Codegeist judges to test the live app on their demo Jira site without configuration friction.
+- [ ] **7.3 Devpost Submission Package**: Thorough write-up addressing all 5 judging criteria, technical architecture, and Marketplace viability.
