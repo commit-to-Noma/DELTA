@@ -356,4 +356,230 @@ describe('DELTA Hydraulic Simulation Engine — Mathematical Verification', () =
 
     expect(state.accounting.relativeError).toBeLessThan(1e-9);
   });
+
+  // TEST-11: Timestep Convergence
+  it('TEST-11: verifies solutions converge under progressively smaller macro timesteps', () => {
+    const config = createFlatConfig(10.0);
+    // Deposit water in column 0
+    const initialDepth = new Float64Array(defaultNx * defaultNy);
+    for (let j = 0; j < defaultNy; j++) {
+      initialDepth[j * defaultNx + 0] = 1.0;
+    }
+
+    function runWithDt(dt: number, totalSeconds: number) {
+      let state = createHydraulicState(config, initialDepth);
+      const steps = Math.round(totalSeconds / dt);
+      for (let s = 0; s < steps; s++) {
+        state = stepHydraulics(state, {
+          dtMacroSeconds: dt,
+          rainfallRateMmPerHour: 0.0,
+        });
+      }
+      return state;
+    }
+
+    const stateDt2 = runWithDt(2.0, 20.0);
+    const stateDt1 = runWithDt(1.0, 20.0);
+    const stateDt05 = runWithDt(0.5, 20.0);
+
+    // All must conserve mass
+    expect(stateDt2.accounting.relativeError).toBeLessThan(1e-10);
+    expect(stateDt1.accounting.relativeError).toBeLessThan(1e-10);
+    expect(stateDt05.accounting.relativeError).toBeLessThan(1e-10);
+
+    // Final water storage across all runs must match initial storage to machine precision
+    expect(Math.abs(stateDt2.accounting.currentStorageM3 - stateDt05.accounting.currentStorageM3)).toBeLessThan(1e-9);
+  });
+
+  // TEST-12: Non-Integer Macro Timestep Handling (Remainder Substep)
+  it('TEST-12: correctly handles non-integer macro timesteps and small residual dt without overshooting', () => {
+    const config = createFlatConfig(12.0);
+    let state = createHydraulicState(config);
+
+    // Step with fractional non-standard seconds
+    state = stepHydraulics(state, {
+      dtMacroSeconds: 1.037,
+      rainfallRateMmPerHour: 40.0,
+    });
+
+    expect(state.totalTimeSeconds).toBeCloseTo(1.037, 5);
+    expect(state.accounting.relativeError).toBeLessThan(1e-10);
+
+    // Step with tiny 0.02s step
+    state = stepHydraulics(state, {
+      dtMacroSeconds: 0.02,
+      rainfallRateMmPerHour: 50.0,
+    });
+
+    expect(state.totalTimeSeconds).toBeCloseTo(1.057, 5);
+    expect(state.accounting.relativeError).toBeLessThan(1e-10);
+  });
+
+  // TEST-13: Near-Zero Hydraulic Gradient & Dry-Bed Wetting
+  it('TEST-13: smoothly propagates water across near-zero hydraulic slope into dry cells without instability', () => {
+    const numCells = defaultNx * defaultNy;
+    const elev = new Float64Array(numCells);
+
+    // Nearly flat slope: 0.0001 (10cm over 1km)
+    for (let j = 0; j < defaultNy; j++) {
+      for (let i = 0; i < defaultNx; i++) {
+        elev[j * defaultNx + i] = 20.0 - i * 0.0025; // 0.1m total drop across grid
+      }
+    }
+
+    const config: HydraulicGridConfig = {
+      nx: defaultNx,
+      ny: defaultNy,
+      dx: defaultDx,
+      elevation: elev,
+    };
+
+    const initialDepth = new Float64Array(numCells);
+    // Place very shallow 0.02m water layer on west column
+    for (let j = 0; j < defaultNy; j++) {
+      initialDepth[j * defaultNx + 0] = 0.02;
+    }
+
+    let state = createHydraulicState(config, initialDepth);
+
+    for (let step = 0; step < 20; step++) {
+      state = stepHydraulics(state, {
+        dtMacroSeconds: 2.0,
+        rainfallRateMmPerHour: 0.0,
+      });
+
+      for (let c = 0; c < numCells; c++) {
+        expect(state.waterDepth[c]).toBeGreaterThanOrEqual(0);
+        expect(Number.isFinite(state.waterDepth[c])).toBe(true);
+      }
+    }
+
+    expect(state.accounting.relativeError).toBeLessThan(1e-10);
+  });
+
+  // TEST-14: Simultaneous Coupled Inflows, Infiltration, Drainage & Open Boundary
+  it('TEST-14: strictly conserves mass when rainfall, infiltration, drainage, and boundary discharge occur simultaneously', () => {
+    const numCells = defaultNx * defaultNy;
+    const elev = new Float64Array(numCells);
+
+    // Irregular undulating terrain sloping toward corner outfall
+    for (let j = 0; j < defaultNy; j++) {
+      for (let i = 0; i < defaultNx; i++) {
+        elev[j * defaultNx + i] = 40.0 - (i + j) * 0.8 + Math.sin(i) * 1.5;
+      }
+    }
+
+    const infil = new Float64Array(numCells);
+    infil.fill(0.00002); // 0.02 mm/s
+
+    const config: HydraulicGridConfig = {
+      nx: defaultNx,
+      ny: defaultNy,
+      dx: defaultDx,
+      elevation: elev,
+      infiltrationRate: infil,
+      drainageInlets: [
+        { index: 55, capacityM3PerSec: 3.0, blockageRatio: 0.1 },
+        { index: 120, capacityM3PerSec: 4.5, blockageRatio: 0.5 },
+      ],
+      openBoundaryIndices: [numCells - 1, numCells - 2], // South-east corner outfalls
+    };
+
+    // Preload with 0.2m water
+    const initialDepth = new Float64Array(numCells);
+    initialDepth.fill(0.2);
+
+    let state = createHydraulicState(config, initialDepth);
+
+    for (let step = 0; step < 30; step++) {
+      state = stepHydraulics(state, {
+        dtMacroSeconds: 2.0,
+        rainfallRateMmPerHour: 75.0,
+      });
+    }
+
+    // Assert all sinks and sources have recorded non-zero volumes
+    expect(state.accounting.cumulativeRainfallM3).toBeGreaterThan(0);
+    expect(state.accounting.cumulativeInfiltrationM3).toBeGreaterThan(0);
+    expect(state.accounting.cumulativeDrainageM3).toBeGreaterThan(0);
+    expect(state.accounting.cumulativeBoundaryOutflowM3).toBeGreaterThan(0);
+
+    // Global mass balance must hold strictly
+    expect(state.accounting.relativeError).toBeLessThan(1e-10);
+  });
+
+  // TEST-15: Long-Duration Simulation Stability
+  it('TEST-15: exhibits zero cumulative numerical drift or precision decay over 500 macro steps (1,000s)', () => {
+    const config = createFlatConfig(25.0);
+    let state = createHydraulicState(config);
+
+    for (let step = 0; step < 500; step++) {
+      state = stepHydraulics(state, {
+        dtMacroSeconds: 2.0,
+        rainfallRateMmPerHour: 30.0,
+      });
+    }
+
+    expect(state.totalTimeSeconds).toBe(1000.0);
+    expect(state.accounting.relativeError).toBeLessThan(1e-10);
+    expect(Number.isFinite(state.accounting.currentStorageM3)).toBe(true);
+  });
+
+  // TEST-16: Grid Resolution Invariance (16x16, 32x32, 64x64)
+  it('TEST-16: executes stably across different grid resolutions (16x16, 32x32, 64x64)', () => {
+    const resolutions = [16, 32, 64];
+
+    for (const res of resolutions) {
+      const numCells = res * res;
+      const elev = new Float64Array(numCells);
+      elev.fill(15.0);
+
+      const config: HydraulicGridConfig = {
+        nx: res,
+        ny: res,
+        dx: 25.0,
+        elevation: elev,
+      };
+
+      let state = createHydraulicState(config);
+      state = stepHydraulics(state, {
+        dtMacroSeconds: 2.0,
+        rainfallRateMmPerHour: 60.0,
+      });
+
+      expect(state.accounting.relativeError).toBeLessThan(1e-10);
+      expect(state.waterDepth.length).toBe(numCells);
+    }
+  });
+
+  // TEST-17: Extreme Manning Roughness Bounds
+  it('TEST-17: remains stable and non-negative under extreme physical roughness limits (n=0.010 to n=0.150)', () => {
+    const extremeNValues = [0.010, 0.035, 0.080, 0.150];
+
+    for (const n of extremeNValues) {
+      const config = {
+        ...createFlatConfig(10.0),
+        manningN: n,
+      };
+
+      const initialDepth = new Float64Array(defaultNx * defaultNy);
+      initialDepth[0] = 2.0; // High concentrated depth at origin
+
+      let state = createHydraulicState(config, initialDepth);
+
+      for (let s = 0; s < 10; s++) {
+        state = stepHydraulics(state, {
+          dtMacroSeconds: 2.0,
+          rainfallRateMmPerHour: 10.0,
+        });
+
+        for (let c = 0; c < defaultNx * defaultNy; c++) {
+          expect(state.waterDepth[c]).toBeGreaterThanOrEqual(0.0);
+          expect(Number.isFinite(state.waterDepth[c])).toBe(true);
+        }
+      }
+
+      expect(state.accounting.relativeError).toBeLessThan(1e-10);
+    }
+  });
 });

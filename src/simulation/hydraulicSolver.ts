@@ -167,9 +167,13 @@ export function stepHydraulics(
     const waveSpeed = Math.sqrt(9.81 * Math.max(0.01, maxDepth));
     const dtAdvective = (0.5 * dx) / (waveSpeed + 1.0);
 
-    // Limit maximum sub-step to 0.5s for precision
+    // Limit maximum sub-step to 0.5s for precision; prevent sub-step from exceeding dtRemaining
     let dtSub = Math.min(dtRemaining, 0.5, dtDiffusive, dtAdvective);
-    if (dtSub < 0.05) dtSub = 0.05; // Floor to prevent infinite stalls
+    if (dtSub < 0.01 && dtRemaining >= 0.01) {
+      dtSub = 0.01; // Floor to prevent infinite stalls, but never exceed dtRemaining
+    } else if (dtSub > dtRemaining) {
+      dtSub = dtRemaining;
+    }
 
     // 2. Rainfall input (m3/s converted into cell addition)
     const rainIntensityMPerSec = options.rainfallRateMmPerHour / (3.6e6);
