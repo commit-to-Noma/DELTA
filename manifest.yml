@@ -6,27 +6,32 @@ modules:
   rovo:agent:
     - key: delta-incident-agent
       name: DELTA Hydraulic Advisor
-      description: Explains deterministic flood simulation interventions and trade-offs for municipal infrastructure.
+      description: Explains deterministic flood simulation interventions and
+        trade-offs for municipal infrastructure.
       prompt: >
-        You are DELTA Hydraulic Advisor, an explainable assistant embedded in Jira.
-        You evaluate deterministic flood simulation models, explain why candidate interventions are prioritized,
-        and detail the physical trade-offs regarding hospital route accessibility. You never approve or dispatch
-        operational tasks autonomously; human incident commanders hold approval authority.
+        You are DELTA Hydraulic Advisor, an explainable assistant embedded in
+        Jira. You evaluate deterministic flood simulation models, explain why
+        candidate interventions are prioritized, and detail the physical
+        trade-offs regarding hospital route accessibility. You never approve or
+        dispatch operational tasks autonomously; human incident commanders hold
+        approval authority.
       actions:
         - get-simulation-status
         - evaluate-interventions
-  rovo:action:
+  action:
     - key: get-simulation-status
+      name: Get Simulation Status
       function: rovo-action-handler
-      actionType: READ_ONLY
+      actionVerb: GET
       description: Retrieves the current hydraulic model status, active disruptions, and water balance.
     - key: evaluate-interventions
+      name: Evaluate Interventions
       function: rovo-action-handler
-      actionType: READ_ONLY
+      actionVerb: GET
       description: Compares candidate flood interventions against the standardized storm baseline.
   function:
     - key: rovo-action-handler
-      handler: src/resolvers/index.handler
+      handler: resolvers/index.handler
 
 resources:
   - key: main-ui
@@ -39,6 +44,6 @@ permissions:
     - storage:app
 
 app:
-  id: ari:cloud:ecosystem::app/00000000-0000-0000-0000-000000000000
+  id: ari:cloud:ecosystem::app/7c4b604a-2340-4df7-8c0a-8fd8e44b7a12
   runtime:
     name: nodejs22.x

@@ -17,8 +17,8 @@
 - [x] **0.5.1 Technical & Scope Audit**: Formulated and committed `TECHNICAL_AND_SCOPE_AUDIT.md`. *(Committed: fdb6fd5)*
 - [x] **0.5.2 Data Integrity Labels**: Calibrated all synthetic data indicators across `FloodSimulationView.tsx`, `DecisionRecordsView.tsx`, and `OperationalTicketsView.tsx`. *(Committed: fdb6fd5)*
 - [x] **0.5.3 Forge Entry Point Alignment**: Configured `src/App.tsx` to default directly into the operational application shell, keeping the landing page accessible via `?view=landing`. *(Committed: fdb6fd5)*
-- [x] **0.5.4 Spike A (Forge Custom UI & Manifest)**: Defined `manifest.yml` with `jira:projectPage`, nodejs22.x runtime, and validated via `forge lint`. *(Committed: 7009de2)*
-- [x] **0.5.5 Spike B (Rovo Agent & Actions)**: Declared `rovo:agent` and `rovo:action` modules in `manifest.yml` and authored resolver handler in `src/resolvers/index.ts`. *(Committed: 7009de2)*
+- [x] **0.5.4 Spike A (Forge Custom UI & Manifest)**: Defined `manifest.yml` with `jira:projectPage`, nodejs22.x runtime. Registered app (`7c4b604a-2340-4df7-8c0a-8fd8e44b7a12`), deployed to development, and installed onto live Jira tenant `nomathembancube2005.atlassian.net`.
+- [x] **0.5.5 Spike B (Rovo Agent & Actions)**: Declared `rovo:agent` and `action` modules with `actionVerb: GET`, verified with 0 lint errors, and deployed resolver handler in `src/resolvers/index.js`.
 
 ---
 
