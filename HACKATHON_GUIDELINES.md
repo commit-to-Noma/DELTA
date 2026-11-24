@@ -60,15 +60,43 @@ In Codegeist judging, ties are broken sequentially using the order of criteria b
 - **Target Persona**: Municipal Flood Incident Commanders, Public Works Directors, Emergency Operations Centers (EOC), and Healthcare Facility Logistics Directors.
 - **Problem**: During severe convective rain events, emergency managers lack spatial hydraulic intelligence to know which hospital corridors will fail first and which field interventions will keep ambulance bays open.
 
-### Targeted Bonus Prizes ($1,500 each)
-1. **Best Agents - Rovo / Assignable Agents**:
-   - `rovo:agent` ("DELTA Hydraulic Advisor") with specialized skills and actions (`get-simulation-status`, `evaluate-interventions`).
-2. **Best Apps with Teamwork Graph Integration**:
-   - Links flood incidents, critical medical facilities, municipal drainage infrastructure, and historical post-incident reviews in Teamwork Graph.
-3. **Best App with Atlassian MCP**:
-   - Exposes DELTA hydraulic solver inspection and candidate intervention tools via Model Context Protocol (`skill.md` provided).
-4. **Best Marketplace Published App**:
-   - Packaged and pre-submitted to the Atlassian Marketplace following enterprise app standards.
+### Targeted Bonus Prizes ($1,500 each — 24 Winners Total, 6 per Category)
+*Note: A single submission can win up to one Grand Prize ($15,000) AND one Bonus Prize ($1,500), for a potential $16,500 top award.*
+
+1. **Best Agents - Rovo / Assignable Agents (6 Winners @ $1,500)**:
+   - Forge apps including the `rovo:agent` module, `rovo:agentConnector` module, or reusable `rovo:skill` and `rovo:action` modules that other agents can invoke as tools.
+   - *DELTA Implementation*: `rovo:agent` ("DELTA Hydraulic Advisor") with dedicated actions (`get-simulation-status`, `evaluate-interventions`).
+2. **Best App with Atlassian MCP (6 Winners @ $1,500)**:
+   - Forge apps exposing tools via the Atlassian MCP server using the `rovo:mcp` module, accompanied by open-source `skill.md`.
+   - *DELTA Implementation*: Exposes 2D hydraulic solver state inspection and candidate intervention evaluation over MCP.
+3. **Best Apps with Teamwork Graph Integration (6 Winners @ $1,500)**:
+   - Connects data into the graph and/or consumes data from the Teamwork Graph API (now in public preview).
+   - *DELTA Implementation*: Links flood incidents, critical medical facilities, municipal drainage infrastructure, and historical post-incident reviews in TWG.
+4. **Best Marketplace Published App (6 Winners @ $1,500)**:
+   - Published to the Atlassian Marketplace or submitted for listing.
+   - *CRITICAL DEVPOST REQUIREMENT*: *"Submit your listing early so the review ticket link is ready when you submit. Provide either the link to the listing or link to the Marketplace review ticket."*
+   - *DELTA Implementation*: Early packaging and Marketplace review ticket submission prior to the Dec 22 deadline.
+
+---
+
+## 4. Official Submission Checklist & Non-Negotiables (Devpost Rules)
+
+1. **Access / Installable Link**:
+   - Provide an installation link created via [Forge Distribution](https://developer.atlassian.com/platform/forge/distribute-your-apps/#start-sharing-your-app).
+   - Detailed configuration and testing instructions for judges (sample project, keys, test prompts).
+2. **Public YouTube Demo Video (< 5:00 minutes)**:
+   - Must be uploaded to YouTube and made publicly visible.
+   - Must demonstrate the app functioning on the device/screen for which it was built.
+   - Judges are not required to watch beyond five minutes.
+   - Zero copyrighted music or unauthorized third-party trademarks.
+3. **Devpost Form Fields**:
+   - Explicit selection of Category: **Apps for Specialized Industries**.
+   - Explicit selection of Bonus Prizes with accompanying justifications.
+   - Marketplace review ticket link or published listing URL.
+   - Clear text explanation of how the project meets the main technology requirement (Forge serverless).
+4. **Original Work & Licensing Compliance**:
+   - Compliant open-source and third-party data licenses (USGS 3DEP CC0, OpenStreetMap ODbL 1.0 with attribution, NOAA Atlas 14).
+   - Append-only decision records with zero synthetic data presented as real.
 
 ---
 

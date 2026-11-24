@@ -70,7 +70,8 @@
 
 ---
 
-## [ ] Phase 7: Hackathon Video, Testing Sandbox Guide & Devpost Submission
-- [ ] **7.1 "Golden Journey" Demo Video (< 5:00 min)**: Produce high-energy, narrative-driven video demonstrating the complete crisis cycle (Pre-storm baseline -> Culvert blockage -> Real-time solver replan -> Multi-scenario comparison -> Rovo audit -> Human approval -> Proactive workflow gate -> JSM dispatch -> Confluence runbook).
-- [ ] **7.2 Zero-Friction Testing Sandbox Guide**: Comprehensive walkthrough for Codegeist judges to test the live app on their demo Jira site without configuration friction.
-- [ ] **7.3 Devpost Submission Package**: Thorough write-up addressing all 5 judging criteria, technical architecture, and Marketplace viability.
+## [ ] Phase 7: Marketplace Listing, Video & Devpost Submission
+- [ ] **7.1 "Golden Journey" Demo Video (< 5:00 min)**: Produce high-energy, narrative-driven video on YouTube demonstrating the complete crisis cycle (Pre-storm baseline -> Culvert blockage -> Real-time solver replan -> Multi-scenario comparison -> Rovo audit -> Human approval -> Proactive workflow gate -> JSM dispatch -> Confluence runbook). Publicly visible, no copyrighted music.
+- [ ] **7.2 Marketplace Early Submission & Review Ticket**: Package app for Atlassian Marketplace, submit early for listing review, and obtain the Marketplace Review Ticket Link required by Devpost for the $1,500 Bonus Prize.
+- [ ] **7.3 Sharable Forge Installation Link & Sandbox Guide**: Generate public installation link via Forge app distribution (`developer.atlassian.com/platform/forge/distribute-your-apps`); author step-by-step testing instructions for judges verifying clean installation on fresh demo sites.
+- [ ] **7.4 Devpost Submission Form Completion**: Finalize Devpost text covering all 5 judging criteria (Technological Implementation 20%, Design 20%, Impact 20%, Innovation 20%, Presentation 20%), category selection (Specialized Industries), and bonus prize declarations before December 22, 2026 @ 12:00pm PST.
