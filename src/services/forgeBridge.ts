@@ -72,5 +72,40 @@ export async function invokeSafe(functionKey: string, payload?: any): Promise<an
     return { success: true, status: 'COMPLETED_RUN', message: 'Saved in local session' };
   }
 
+  if (functionKey === 'saveInterventionsEvaluation') {
+    try {
+      localStorage.setItem('delta_latest_interventions', JSON.stringify(payload));
+      return { success: true, status: 'SAVED_LOCAL', data: payload };
+    } catch {
+      return { success: true, status: 'SAVED_LOCAL' };
+    }
+  }
+
+  if (functionKey === 'evaluateInterventions') {
+    try {
+      const stored = localStorage.getItem('delta_latest_interventions');
+      if (stored) {
+        return { success: true, status: 'COMPLETED_EVALUATION', data: JSON.parse(stored) };
+      }
+      return { success: true, status: 'NO_RUN', message: 'No evaluation recorded in local session.' };
+    } catch {
+      return { success: true, status: 'NO_RUN' };
+    }
+  }
+
+  if (functionKey === 'queryTeamworkGraph') {
+    return {
+      success: true,
+      nodes: [
+        { id: 'FACILITY-BWH', type: 'HEALTHCARE_FACILITY', name: "Brigham and Women's Hospital" },
+        { id: 'FACILITY-BCH', type: 'HEALTHCARE_FACILITY', name: "Boston Children's Hospital" },
+        { id: 'DRAIN-CULVERT-01', type: 'MUNICIPAL_DRAINAGE', name: 'Brookline Avenue Culvert' }
+      ],
+      edges: [
+        { id: 'EDGE-01', sourceNodeId: 'FACILITY-BWH', targetNodeId: 'DRAIN-CULVERT-01', relationType: 'DRAINED_BY' }
+      ]
+    };
+  }
+
   return { success: true, data: null };
 }

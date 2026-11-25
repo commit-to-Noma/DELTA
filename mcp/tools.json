@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "delta-hydraulic-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol (MCP) server exposing 2D hydraulic flood simulation, multi-scenario intervention evaluation, and Atlassian Teamwork Graph dependencies for municipal crisis response.",
+  "tools": [
+    {
+      "name": "delta_get_catchment_state",
+      "description": "Retrieves the authoritative 64x64 Boston Longwood catchment specifications, USGS elevation stats, 5 hospital complexes, and 3 drainage inlets.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "includeFacilities": {
+            "type": "boolean",
+            "description": "Whether to return full hospital complex metadata."
+          },
+          "includeDrainage": {
+            "type": "boolean",
+            "description": "Whether to return drainage culverts and nominal capacities."
+          }
+        }
+      }
+    },
+    {
+      "name": "delta_step_hydraulic_simulation",
+      "description": "Executes 2D mass-conserving diffusive-wave shallow water equations across the 4,096-cell grid with adaptive CFL sub-stepping.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "durationSeconds": {
+            "type": "number",
+            "description": "Elapsed duration of flood wave to simulate in seconds (default: 600)."
+          },
+          "rainfallIntensityMmPerHour": {
+            "type": "number",
+            "description": "Rainfall precipitation rate applied across catchment (default: 35.0 mm/h)."
+          },
+          "disruptedCulvertId": {
+            "type": "string",
+            "description": "Optional active infrastructure choke point (e.g. 'CULVERT-01-BROOKLINE')."
+          }
+        },
+        "required": ["durationSeconds"]
+      }
+    },
+    {
+      "name": "delta_evaluate_interventions",
+      "description": "Runs deterministic multi-scenario simulation comparing Plan Alpha (sandbags), Plan Beta (mobile pump), and Plan Gamma (culvert jetting) against an invariant baseline storm.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "simulatedSeconds": {
+            "type": "number",
+            "description": "Duration of comparison run in seconds (default: 1800)."
+          },
+          "stormBurstRateMmPerHour": {
+            "type": "number",
+            "description": "Design storm burst intensity in mm/h (default: 35.0)."
+          }
+        }
+      }
+    },
+    {
+      "name": "delta_get_decision_records",
+      "description": "Queries immutable Decision Records stored in Forge Key-Value Storage (KVS) signed by human Incident Commanders.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "description": "Optional specific decision record ID (e.g. 'DEC-2026-081')."
+          }
+        }
+      }
+    },
+    {
+      "name": "delta_query_teamwork_graph",
+      "description": "Traverses Atlassian Teamwork Graph nodes and dependencies connecting healthcare facilities, drainage culverts, and Jira incident work orders.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "facilityId": {
+            "type": "string",
+            "description": "Filter dependencies for a specific facility (e.g. 'FACILITY-BWH')."
+          },
+          "filterType": {
+            "type": "string",
+            "description": "Optional node type filter ('HEALTHCARE_FACILITY', 'MUNICIPAL_DRAINAGE', 'DISPATCH_WORK_ORDER')."
+          }
+        }
+      }
+    }
+  ]
+}
