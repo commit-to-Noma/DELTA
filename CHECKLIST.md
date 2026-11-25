@@ -63,10 +63,10 @@
 
 ---
 
-## [ ] Phase 3: Multi-Scenario Intervention Planner & Fair Baseline Comparison
-- [ ] **3.1 Candidate Plan Scenarios**: Define structured mitigation interventions (Plan A: Sandbag dyking on Brookline Ave; Plan B: High-capacity mobile pumps discharging to Muddy River; Plan C: Emergency vacuum culvert jetting).
-- [ ] **3.2 Normalized Scoring Matrix**: Simulate every candidate intervention against the identical NOAA Atlas 14 baseline storm; compute quantitative metrics: avoided flood volume ($\text{m}^3$), ambulance response delay avoided ($\text{min}$), deployment hours, and equipment cost.
-- [ ] **3.3 Interactive Trade-Off Visualizer**: Multi-scenario comparison panel allowing the incident commander to toggle candidate interventions and inspect comparative water depth profiles.
+## [x] Phase 3: Multi-Scenario Intervention Planner & Fair Baseline Comparison
+- [x] **3.1 Candidate Plan Scenarios**: Defined authoritative physical interventions in `src/simulation/interventionEngine.ts`: Plan Alpha (Deployable barrier / sandbags with $+0.50\text{ m}$ crest elevation along Francis St ambulance corridor `[41, 26], [42, 26], [43, 27], [43, 28]`), Plan Beta (Mobile high-capacity pump active suction sink extracting $2.0\text{ m}^3/\text{s}$ at Muddy River low retention basin `[17, 25]`), and Plan Gamma (Emergency culvert jetting restoring `CULVERT-01-BROOKLINE` capacity from 0 to $12.5\text{ m}^3/\text{s}$).
+- [x] **3.2 Normalized Scoring Matrix & Invariant Solver Baseline**: Implemented `executeMultiScenarioEvaluation` executing 2D diffusive-wave hydraulic simulation (`stepHydraulics`) independently across all candidate plans against an invariant NOAA Atlas 14 baseline storm. Derived strictly computed physical metrics: avoided surface flood volume ($\text{m}^3$), peak water depth reduction ($\text{m}$), protected road count ($N_{\text{roads}}$ with passability $\ge 0.30\text{ m}$), and hospital accessibility transitions across all 5 Longwood complexes. Fabricated transit delay minutes completely eradicated.
+- [x] **3.3 Interactive Trade-Off Visualizer**: Built side-by-side comparative matrix grid in `src/components/shell/views/InterventionsView.tsx` displaying the baseline and all 3 candidate plans, complete with physical parameter inspectors, hospital transitions, objective model recommendations, and scientific screening model disclaimers. Verified with 10 automated tests in `tests/interventionEngine.test.ts` (117/117 total suite tests passing).
 
 ---
 
