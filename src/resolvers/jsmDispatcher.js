@@ -26,21 +26,13 @@ import {
 
 /**
  * Server-side feature flag controlling automated Jira issue dispatch.
- * Hard-pinned to false for Phase 0.7.2 (KVS Smoke Test Phase).
+ * Immutable, non-exported constant hard-pinned to false for Phase 0.7.2 (KVS Smoke Test Phase).
  * 
- * When false, createDispatchTicket immediately rejects before executing
- * authorization queries, KVS lease operations, or Jira Cloud REST API calls.
+ * In the production Forge runtime, automated Jira issue creation is permanently disabled.
+ * There is NO exported variable, setter function, client payload override, environment variable,
+ * or application-level mechanism to enable live dispatch.
  */
-export let LIVE_DISPATCH_ENABLED = false;
-
-/**
- * Internal helper for automated test suites to evaluate dispatch engine
- * mechanics when explicitly enabled in a mocked test environment.
- * NOT accessible via any resolver, client payload, or Rovo action.
- */
-export function __setLiveDispatchEnabledForTesting(enabled) {
-  LIVE_DISPATCH_ENABLED = Boolean(enabled);
-}
+const LIVE_DISPATCH_ENABLED = false;
 
 /**
  * Builds an Atlassian Document Format (ADF) document for Jira issue description.

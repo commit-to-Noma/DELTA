@@ -17,14 +17,14 @@
  * - Preserved Plan Beta verified culvert coordinates
  */
 
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import * as jsmDispatcherModule from '../src/resolvers/jsmDispatcher.js';
 import {
   createDispatchTicket,
-  buildDispatchAdfDescription,
-  LIVE_DISPATCH_ENABLED,
-  __setLiveDispatchEnabledForTesting
+  buildDispatchAdfDescription
 } from '../src/resolvers/jsmDispatcher.js';
 import { handler } from '../src/resolvers/index.js';
+import { createTestDispatchTicket } from './helpers/testDispatchEngine.js';
 import {
   resolveDispatchLocation,
   validateAndReconcileLocation,
@@ -200,7 +200,6 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
   // -------------------------------------------------------------
   it('TEST-KILLSWITCH-01: [Mocked] Direct createDispatchTicket invocation is blocked when dispatch is disabled', async () => {
     await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-    expect(LIVE_DISPATCH_ENABLED).toBe(false);
 
     let thrownError: any;
     try {
@@ -279,6 +278,19 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     // Strictly assert zero side-effects
     expect(kvsSetCalled).toBe(false);
     expect(jiraRequestCalled).toBe(false);
+  });
+
+  it('TEST-KILLSWITCH-04: [Mocked] Static verification that production jsmDispatcher exports zero setters and no mutable flags', () => {
+    // 1. Verify exact export surface of production resolver module
+    const exportedKeys = Object.keys(jsmDispatcherModule).sort();
+    expect(exportedKeys).toEqual(['buildDispatchAdfDescription', 'createDispatchTicket']);
+
+    // 2. Assert LIVE_DISPATCH_ENABLED is NOT exported
+    expect((jsmDispatcherModule as any).LIVE_DISPATCH_ENABLED).toBeUndefined();
+
+    // 3. Assert no setter or override function exists
+    expect((jsmDispatcherModule as any).__setLiveDispatchEnabledForTesting).toBeUndefined();
+    expect((jsmDispatcherModule as any).setLiveDispatchEnabled).toBeUndefined();
   });
 
   // -------------------------------------------------------------
@@ -399,17 +411,9 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
   });
 
   // -------------------------------------------------------------
-  // Part D: Dispatch Engine Authorization & Recovery Suite (Controlled Test Mode)
+  // Part D: Isolated Dispatch Engine Mechanics & Recovery Suite (Test-Only Harness)
   // -------------------------------------------------------------
-  describe('Dispatch Engine Mechanics & Recovery (Testing Killswitch Temporarily Lifted)', () => {
-    beforeAll(() => {
-      __setLiveDispatchEnabledForTesting(true);
-    });
-
-    afterAll(() => {
-      __setLiveDispatchEnabledForTesting(false);
-    });
-
+  describe('Part D: Isolated Dispatch Engine Mechanics & Recovery Suite (Test-Only Harness)', () => {
     it('TEST-AUTH-02: [Mocked] Rejects client attempt to override projectKey during field dispatch', async () => {
       await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
 
@@ -419,7 +423,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       };
 
       await expect(
-        createDispatchTicket(orderWithTamperedProject, AUTH_OPTIONS)
+        createTestDispatchTicket(orderWithTamperedProject, AUTH_OPTIONS)
       ).rejects.toThrow(/Project scope mismatch/);
     });
 
@@ -428,7 +432,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
 
       // Caller is omitted from server context; client attempts to pass caller in order payload
       await expect(
-        createDispatchTicket({ decisionId: 'DEC-2026-0050', caller: 'forged-caller-id' }, {})
+        createTestDispatchTicket({ decisionId: 'DEC-2026-0050', caller: 'forged-caller-id' }, {})
       ).rejects.toThrow(/Dispatch authorization denied: Missing or unverified Jira user identity/);
     });
 
@@ -436,7 +440,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
 
       await expect(
-        createDispatchTicket({ decisionId: 'DEC-2026-0050' }, { caller: 'user-unauthorized-staff' })
+        createTestDispatchTicket({ decisionId: 'DEC-2026-0050' }, { caller: 'user-unauthorized-staff' })
       ).rejects.toThrow(/Dispatch authorization denied for account 'user-unauthorized-staff'/);
     });
 
@@ -462,7 +466,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
         async requestJira() { return { id: '10999', key: 'EMERG-999' }; }
       };
 
-      const dispatchResult = await createDispatchTicket(
+      const dispatchResult = await createTestDispatchTicket(
         { decisionId: 'DEC-2026-0079' },
         { caller: 'qm:commander-shephard', customJiraClient: workingJiraClient }
       );
@@ -480,7 +484,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       status: 'SUPERSEDED'
     }, null, COMMANDER_AUTH);
 
-    await expect(createDispatchTicket({ decisionId: 'DEC-2026-0099' }, AUTH_OPTIONS))
+    await expect(createTestDispatchTicket({ decisionId: 'DEC-2026-0099' }, AUTH_OPTIONS))
       .rejects.toThrow(/Only 'APPROVED' decisions may be dispatched/);
   });
 
@@ -502,7 +506,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       }
     };
 
-    const firstResult = await createDispatchTicket(
+    const firstResult = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: mockJiraClient }
     );
@@ -511,7 +515,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     expect(firstResult.isExisting).toBeUndefined();
     expect(apiInvocationCount).toBe(1);
 
-    const secondResult = await createDispatchTicket(
+    const secondResult = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: mockJiraClient }
     );
@@ -532,7 +536,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       }
     };
 
-    const firstDispatchPromise = createDispatchTicket(
+    const firstDispatchPromise = createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: slowJiraClient }
     );
@@ -540,7 +544,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     await new Promise((r) => setTimeout(r, 10));
 
     await expect(
-      createDispatchTicket(
+      createTestDispatchTicket(
         { decisionId: 'DEC-2026-0050' },
         { ...AUTH_OPTIONS, customJiraClient: slowJiraClient }
       )
@@ -582,7 +586,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
 
     // Retry invocation must transition to UNCERTAIN and FAIL CLOSED, never issuing a POST
     await expect(
-      createDispatchTicket(
+      createTestDispatchTicket(
         { decisionId: 'DEC-2026-0050' },
         { ...AUTH_OPTIONS, customJiraClient: searchLagClient, storageOverride: storageClient }
       )
@@ -617,7 +621,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
 
     // First attempt: encounters 502 -> marks UNCERTAIN in KVS
     await expect(
-      createDispatchTicket(
+      createTestDispatchTicket(
         { decisionId: 'DEC-2026-0050' },
         { ...AUTH_OPTIONS, customJiraClient: gatewayErrorClient, storageOverride: storageClient }
       )
@@ -637,7 +641,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     };
 
     await expect(
-      createDispatchTicket(
+      createTestDispatchTicket(
         { decisionId: 'DEC-2026-0050' },
         { ...AUTH_OPTIONS, customJiraClient: retryClient, storageOverride: storageClient }
       )
@@ -659,7 +663,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     };
 
     await expect(
-      createDispatchTicket(
+      createTestDispatchTicket(
         { decisionId: 'DEC-2026-0050' },
         { ...AUTH_OPTIONS, customJiraClient: failingClient }
       )
@@ -671,7 +675,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       async requestJira() { return { id: '10555', key: 'EMERG-705' }; }
     };
 
-    const retryResult = await createDispatchTicket(
+    const retryResult = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: workingClient }
     );
@@ -694,7 +698,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       }
     };
 
-    const result = await createDispatchTicket(
+    const result = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: reconcilingClient }
     );
@@ -723,7 +727,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     };
 
     await expect(
-      createDispatchTicket(
+      createTestDispatchTicket(
         { decisionId: 'DEC-2026-0050' },
         { ...AUTH_OPTIONS, customJiraClient: conflictingClient }
       )
@@ -750,7 +754,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
 
     await recordDecision(SAMPLE_APPROVED_DECISION_BETA, failingStorageClient, COMMANDER_AUTH);
 
-    const result = await createDispatchTicket(
+    const result = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: workingJiraClient, storageOverride: failingStorageClient }
     );
@@ -802,7 +806,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     };
 
     // First run creates ticket in Jira, KVS sync fails
-    const firstRes = await createDispatchTicket(
+    const firstRes = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: durableJiraClient, storageOverride: flakyStorage }
     );
@@ -817,7 +821,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       async delete(key: string) { store.delete(key); }
     };
 
-    const retryRes = await createDispatchTicket(
+    const retryRes = await createTestDispatchTicket(
       { decisionId: 'DEC-2026-0050' },
       { ...AUTH_OPTIONS, customJiraClient: durableJiraClient, storageOverride: healedStorage }
     );
