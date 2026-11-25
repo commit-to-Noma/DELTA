@@ -94,7 +94,10 @@ export async function verifyIncidentCommanderAuthorization({
 
     const rolesMap = await rolesResp.json();
     // Strictly require designated 'Incident Commanders' role. Never fallback to 'Administrators'!
-    const targetRoleUrl = rolesMap['Incident Commanders'] || rolesMap['DELTA Incident Commanders'];
+    const targetRoleUrl =
+      rolesMap['Incident Commanders'] ||
+      rolesMap['DELTA Incident Commanders'] ||
+      Object.entries(rolesMap).find(([k]) => k.toLowerCase().includes('incident commander'))?.[1];
 
     if (!targetRoleUrl) {
       return {

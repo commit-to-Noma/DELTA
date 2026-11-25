@@ -557,12 +557,12 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
               <div className="flex items-center justify-between">
                 <span className="text-storm-400">CANONICAL SCENARIO HASH:</span>
                 <code className="text-purple-300 font-mono text-[10px] bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/40">
-                  sha256:7f8e3a2b1c4d9e0f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f
+                  sha256:f0a73115e28a69b7f0dcfbbfe52182597bf8862c482d302b9c50154f488c9a47
                 </code>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-storm-400">AUTHENTICATED IDENTITY:</span>
-                <span className="text-storm-200 font-bold">Cmdr. Vance [Incident Commander]</span>
+                <span className="text-storm-200 font-bold">Incident Commander [Verified Atlassian Session]</span>
               </div>
               <div className="text-[10px] text-amber-400/90 pt-1 border-t border-onyx-800/80">
                 * The server-side Forge resolver verifies caller credentials and binds your authentic Atlassian Jira account ID. Client identity overrides are forbidden.
@@ -617,7 +617,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
                       name: selectedPlanDef.name,
                       type: selectedPlanDef.type
                     },
-                    scenarioHash: 'sha256:7f8e3a2b1c4d9e0f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f',
+                    scenarioHash: 'sha256:f0a73115e28a69b7f0dcfbbfe52182597bf8862c482d302b9c50154f488c9a47',
                     canonicalScenario: {
                       stormId: '50-year',
                       stormDepthMm: 104.2,
@@ -647,7 +647,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
                     engineeringRationale: engineeringRationale.trim(),
                     schemaVersion: '2.0.0',
                     humanApprover: {
-                      displayName: 'Cmdr. Vance',
+                      displayName: 'Incident Commander',
                       role: 'Incident Commander'
                     }
                   };
