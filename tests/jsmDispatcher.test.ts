@@ -17,8 +17,14 @@
  * - Preserved Plan Beta verified culvert coordinates
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { createDispatchTicket, buildDispatchAdfDescription } from '../src/resolvers/jsmDispatcher.js';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
+import {
+  createDispatchTicket,
+  buildDispatchAdfDescription,
+  LIVE_DISPATCH_ENABLED,
+  __setLiveDispatchEnabledForTesting
+} from '../src/resolvers/jsmDispatcher.js';
+import { handler } from '../src/resolvers/index.js';
 import {
   resolveDispatchLocation,
   validateAndReconcileLocation,
@@ -111,12 +117,13 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     expect(loc.gridCellFormatted).toBe('[Row 17, Col 26]');
   });
 
-  it('TEST-COORD-02: [Mocked] Derives Plan Alpha midpoint from OSM Way 1377084984 and verifies modelled staging nomenclature', () => {
+  it('TEST-COORD-02: [Mocked] Derives Plan Alpha location from intermediate centerline vertex (Node 1) of OSM Way 1377084984', () => {
     const loc = resolveDispatchLocation(SAMPLE_APPROVED_DECISION_ALPHA.chosenPlan);
     expect(loc.name).toContain('Modelled Staging Point: Francis Street');
     expect(loc.featureType).toBe('road_segment');
     expect(loc.featureId).toBe('ROAD-1377084984');
     expect(loc.isModelledStagingPoint).toBe(true);
+    expect(loc.provenanceNotice).toContain('intermediate centerline vertex (Node 1)');
     expect(loc.provenanceNotice).toContain('Does not constitute a surveyed physical barrier foundation');
     expect(loc.epsg26986.x).toBe(232384.06);
     expect(loc.epsg26986.y).toBe(898414.94);
@@ -189,7 +196,93 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
   });
 
   // -------------------------------------------------------------
-  // Part B: Hardened Authorization & Project Scope Enforcement
+  // Part B: Server-Side Dispatch Killswitch Enforcement (Phase 0.7.2)
+  // -------------------------------------------------------------
+  it('TEST-KILLSWITCH-01: [Mocked] Direct createDispatchTicket invocation is blocked when dispatch is disabled', async () => {
+    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+    expect(LIVE_DISPATCH_ENABLED).toBe(false);
+
+    let thrownError: any;
+    try {
+      await createDispatchTicket({ decisionId: 'DEC-2026-0050' }, AUTH_OPTIONS);
+    } catch (err: any) {
+      thrownError = err;
+    }
+
+    expect(thrownError).toBeDefined();
+    expect(thrownError.code).toBe('DISPATCH_FEATURE_DISABLED');
+    expect(thrownError.message).toContain('DELTA Field Dispatch is technically disabled');
+  });
+
+  it('TEST-KILLSWITCH-02: [Mocked] Exposed resolver bridge and Rovo entry points are blocked when dispatch is disabled', async () => {
+    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+
+    // 1. Custom UI bridge createDispatchTicket
+    const bridgeCall1 = {
+      call: {
+        functionKey: 'createDispatchTicket',
+        payload: { decisionId: 'DEC-2026-0050' }
+      },
+      context: COMMANDER_AUTH
+    };
+    await expect(handler(bridgeCall1, COMMANDER_AUTH)).rejects.toThrow(/DELTA Field Dispatch is technically disabled/);
+
+    // 2. Custom UI bridge dispatchFieldTeam
+    const bridgeCall2 = {
+      call: {
+        functionKey: 'dispatchFieldTeam',
+        payload: { decisionId: 'DEC-2026-0050' }
+      },
+      context: COMMANDER_AUTH
+    };
+    await expect(handler(bridgeCall2, COMMANDER_AUTH)).rejects.toThrow(/DELTA Field Dispatch is technically disabled/);
+
+    // 3. Rovo action / backend dispatch-field-team
+    const rovoCall = {
+      action: { key: 'dispatch-field-team' },
+      payload: { decisionId: 'DEC-2026-0050' }
+    };
+    await expect(handler(rovoCall, COMMANDER_AUTH)).rejects.toThrow(/DELTA Field Dispatch is technically disabled/);
+  });
+
+  it('TEST-KILLSWITCH-03: [Mocked] No KVS lease is acquired and no Jira request is made when dispatch is disabled', async () => {
+    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+
+    let kvsSetCalled = false;
+    let jiraRequestCalled = false;
+
+    const monitoredStorage = {
+      async get(key: string) { return undefined; },
+      async set(key: string, val: any) { kvsSetCalled = true; },
+      async delete(key: string) {}
+    };
+
+    const monitoredJiraClient = {
+      async searchJira() { return []; },
+      async requestJira() { jiraRequestCalled = true; return {}; }
+    };
+
+    let thrownErr: any;
+    try {
+      await createDispatchTicket(
+        { decisionId: 'DEC-2026-0050' },
+        { ...AUTH_OPTIONS, storageOverride: monitoredStorage, customJiraClient: monitoredJiraClient }
+      );
+    } catch (err: any) {
+      thrownErr = err;
+    }
+
+    expect(thrownErr).toBeDefined();
+    expect(thrownErr.code).toBe('DISPATCH_FEATURE_DISABLED');
+    expect(thrownErr.message).toContain('DELTA Field Dispatch is technically disabled');
+
+    // Strictly assert zero side-effects
+    expect(kvsSetCalled).toBe(false);
+    expect(jiraRequestCalled).toBe(false);
+  });
+
+  // -------------------------------------------------------------
+  // Part C: Hardened Authorization & Project Scope Enforcement
   // -------------------------------------------------------------
   it('TEST-AUTH-01: [Mocked] Rejects client attempt to override operational project key during decision approval', async () => {
     const tamperingPayload = {
@@ -203,33 +296,11 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     ).rejects.toThrow(/Project scope mismatch/);
   });
 
-  it('TEST-AUTH-02: [Mocked] Rejects client attempt to override projectKey during field dispatch', async () => {
-    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-
-    const orderWithTamperedProject = {
-      decisionId: 'DEC-2026-0050',
-      projectKey: 'UNAUTHORIZED_PROJECT'
-    };
-
-    await expect(
-      createDispatchTicket(orderWithTamperedProject, AUTH_OPTIONS)
-    ).rejects.toThrow(/Project scope mismatch/);
-  });
-
   it('TEST-AUTH-03: [Mocked] Rejects approval when server session identity is missing even if client provides accountId', async () => {
     // Calling recordDecision with empty server context {} (missing trusted accountId)
     await expect(
       recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, {})
     ).rejects.toThrow(/Authentication failure: Missing or unverified Jira user identity/);
-  });
-
-  it('TEST-AUTH-04: [Mocked] Rejects dispatch when server session identity is missing even if client provides caller in payload', async () => {
-    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-
-    // Caller is omitted from server context; client attempts to pass caller in order payload
-    await expect(
-      createDispatchTicket({ decisionId: 'DEC-2026-0050', caller: 'forged-caller-id' }, {})
-    ).rejects.toThrow(/Dispatch authorization denied: Missing or unverified Jira user identity/);
   });
 
   it('TEST-AUTH-05: [Mocked] Enforces server-side approver verification (client vs server session mismatch)', async () => {
@@ -264,44 +335,6 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     await expect(
       recordDecision(unauthorizedDecision, null, { accountId: 'user-regular-staff' })
     ).rejects.toThrow(/Incident Commander authorization denied/);
-  });
-
-  it('TEST-AUTH-07: [Mocked] Rejects dispatch attempt from user without Incident Commander role', async () => {
-    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-
-    await expect(
-      createDispatchTicket({ decisionId: 'DEC-2026-0050' }, { caller: 'user-unauthorized-staff' })
-    ).rejects.toThrow(/Dispatch authorization denied for account 'user-unauthorized-staff'/);
-  });
-
-  it('TEST-AUTH-08: [Mocked] Successfully approves and dispatches when caller is an authorized Incident Commander', async () => {
-    const authorizedCommanderDecision = {
-      ...SAMPLE_APPROVED_DECISION_BETA,
-      decisionId: 'DEC-2026-0079',
-      humanApprover: {
-        accountId: 'qm:commander-shephard',
-        displayName: 'Commander Shephard',
-        role: 'Incident Commander',
-        approvalTimestamp: '2026-11-25T09:05:00.000Z'
-      }
-    };
-
-    const recordResult = await recordDecision(authorizedCommanderDecision, null, { accountId: 'qm:commander-shephard' });
-    expect(recordResult.success).toBe(true);
-    expect(recordResult.data.humanApprover.role).toBe('Incident Commander');
-    expect(recordResult.data.humanApprover.authorizationPolicy).toBe('Jira Project Role: Incident Commander');
-
-    const workingJiraClient = {
-      async searchJira() { return []; },
-      async requestJira() { return { id: '10999', key: 'EMERG-999' }; }
-    };
-
-    const dispatchResult = await createDispatchTicket(
-      { decisionId: 'DEC-2026-0079' },
-      { caller: 'qm:commander-shephard', customJiraClient: workingJiraClient }
-    );
-    expect(dispatchResult.success).toBe(true);
-    expect(dispatchResult.issueKey).toBe('EMERG-999');
   });
 
   it('TEST-AUTH-09: [Mocked] Fails closed when Jira Project Role API call fails', async () => {
@@ -357,6 +390,85 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
       })
     ).rejects.toThrow(/group-based role assignments cannot be verified.*fail closed/);
   });
+
+  it('TEST-AUTH-11: [Mocked] Rejects raw string account ID in authContext (requires trusted Forge context object)', async () => {
+    // Attempting to pass a raw string 'qm:user-commander-1' instead of an object { accountId: '...' }
+    await expect(
+      recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, 'qm:839b15ba-58cd-4b57-b8aa-f9b9e6ce67cd:user-commander-1' as any)
+    ).rejects.toThrow(/Authentication failure: Missing or unverified Jira user identity/);
+  });
+
+  // -------------------------------------------------------------
+  // Part D: Dispatch Engine Authorization & Recovery Suite (Controlled Test Mode)
+  // -------------------------------------------------------------
+  describe('Dispatch Engine Mechanics & Recovery (Testing Killswitch Temporarily Lifted)', () => {
+    beforeAll(() => {
+      __setLiveDispatchEnabledForTesting(true);
+    });
+
+    afterAll(() => {
+      __setLiveDispatchEnabledForTesting(false);
+    });
+
+    it('TEST-AUTH-02: [Mocked] Rejects client attempt to override projectKey during field dispatch', async () => {
+      await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+
+      const orderWithTamperedProject = {
+        decisionId: 'DEC-2026-0050',
+        projectKey: 'UNAUTHORIZED_PROJECT'
+      };
+
+      await expect(
+        createDispatchTicket(orderWithTamperedProject, AUTH_OPTIONS)
+      ).rejects.toThrow(/Project scope mismatch/);
+    });
+
+    it('TEST-AUTH-04: [Mocked] Rejects dispatch when server session identity is missing even if client provides caller in payload', async () => {
+      await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+
+      // Caller is omitted from server context; client attempts to pass caller in order payload
+      await expect(
+        createDispatchTicket({ decisionId: 'DEC-2026-0050', caller: 'forged-caller-id' }, {})
+      ).rejects.toThrow(/Dispatch authorization denied: Missing or unverified Jira user identity/);
+    });
+
+    it('TEST-AUTH-07: [Mocked] Rejects dispatch attempt from user without Incident Commander role', async () => {
+      await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+
+      await expect(
+        createDispatchTicket({ decisionId: 'DEC-2026-0050' }, { caller: 'user-unauthorized-staff' })
+      ).rejects.toThrow(/Dispatch authorization denied for account 'user-unauthorized-staff'/);
+    });
+
+    it('TEST-AUTH-08: [Mocked] Successfully approves and dispatches when caller is an authorized Incident Commander', async () => {
+      const authorizedCommanderDecision = {
+        ...SAMPLE_APPROVED_DECISION_BETA,
+        decisionId: 'DEC-2026-0079',
+        humanApprover: {
+          accountId: 'qm:commander-shephard',
+          displayName: 'Commander Shephard',
+          role: 'Incident Commander',
+          approvalTimestamp: '2026-11-25T09:05:00.000Z'
+        }
+      };
+
+      const recordResult = await recordDecision(authorizedCommanderDecision, null, { accountId: 'qm:commander-shephard' });
+      expect(recordResult.success).toBe(true);
+      expect(recordResult.data.humanApprover.role).toBe('Incident Commander');
+      expect(recordResult.data.humanApprover.authorizationPolicy).toBe('Jira Project Role: Incident Commander');
+
+      const workingJiraClient = {
+        async searchJira() { return []; },
+        async requestJira() { return { id: '10999', key: 'EMERG-999' }; }
+      };
+
+      const dispatchResult = await createDispatchTicket(
+        { decisionId: 'DEC-2026-0079' },
+        { caller: 'qm:commander-shephard', customJiraClient: workingJiraClient }
+      );
+      expect(dispatchResult.success).toBe(true);
+      expect(dispatchResult.issueKey).toBe('EMERG-999');
+    });
 
   // -------------------------------------------------------------
   // Part C: Dispatch Idempotency, Uncertainty & Search Lag Recovery
@@ -714,4 +826,5 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     expect(retryRes.reconciledFromJira).toBe(true);
     expect(jiraStore.size).toBe(1); // Exactly one ticket created!
   });
+});
 });

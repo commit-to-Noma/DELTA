@@ -8,8 +8,8 @@
  * PROVENANCE SPECIFICATION:
  * - Plan Beta (CULVERT-01-BROOKLINE): Surveyed Muddy River culvert intake headwall.
  * - Plan Alpha (ROAD-1377084984): Modelled intervention staging point derived from
- *   the midpoint of OpenStreetMap secondary road way 1377084984 (Francis Street)
- *   fronting Brigham and Women's Hospital ambulance bay.
+ *   the intermediate centerline vertex (Node 1) of OpenStreetMap secondary road way
+ *   1377084984 (Francis Street) fronting Brigham and Women's Hospital ambulance bay.
  *   NOTE: This represents a hydrodynamic model deployment corridor; it does NOT
  *   constitute a surveyed or permanent municipal physical barrier foundation.
  */
@@ -25,7 +25,7 @@ export const SOURCED_ROAD_FEATURE_1377084984 = {
   highwayType: 'secondary',
   sourceDataset: 'OpenStreetMap (ODbL 1.0)',
   provenanceType: 'MODELLED_STAGING_POINT',
-  provenanceNotice: 'Modelled intervention staging point derived from OpenStreetMap secondary road way 1377084984 midpoint. Does not constitute a surveyed physical barrier foundation.',
+  provenanceNotice: 'Modelled intervention staging point derived from intermediate centerline vertex (Node 1) of OpenStreetMap secondary road way 1377084984. Does not constitute a surveyed physical barrier foundation.',
   coordinates: [
     { lat: 42.3356589, lon: -71.1072063 },
     { lat: 42.3355553, lon: -71.1070424 },
@@ -44,13 +44,15 @@ export const SOURCED_ROAD_FEATURE_1377084984 = {
 };
 
 /**
- * Programmatically derives the midpoint staging coordinate from the road feature geometry.
+ * Derives the modelled staging coordinate from intermediate centerline vertex (Node 1)
+ * of OSM Way 1377084984.
  */
 function deriveRoadMidpoint(roadFeature) {
-  const midpointIndex = Math.floor(roadFeature.coordinates.length / 2);
-  const geo = roadFeature.coordinates[midpointIndex];
-  const proj = roadFeature.projectedCoordinates[midpointIndex];
-  const cell = roadFeature.gridCells[midpointIndex];
+  // Node 1 represents the intermediate centerline vertex along Francis Street (49.99% of polyline length)
+  const vertexIndex = Math.floor(roadFeature.coordinates.length / 2);
+  const geo = roadFeature.coordinates[vertexIndex];
+  const proj = roadFeature.projectedCoordinates[vertexIndex];
+  const cell = roadFeature.gridCells[vertexIndex];
 
   return {
     siteId: roadFeature.roadId,

@@ -25,6 +25,24 @@ import {
 } from './authPolicy.js';
 
 /**
+ * Server-side feature flag controlling automated Jira issue dispatch.
+ * Hard-pinned to false for Phase 0.7.2 (KVS Smoke Test Phase).
+ * 
+ * When false, createDispatchTicket immediately rejects before executing
+ * authorization queries, KVS lease operations, or Jira Cloud REST API calls.
+ */
+export let LIVE_DISPATCH_ENABLED = false;
+
+/**
+ * Internal helper for automated test suites to evaluate dispatch engine
+ * mechanics when explicitly enabled in a mocked test environment.
+ * NOT accessible via any resolver, client payload, or Rovo action.
+ */
+export function __setLiveDispatchEnabledForTesting(enabled) {
+  LIVE_DISPATCH_ENABLED = Boolean(enabled);
+}
+
+/**
  * Builds an Atlassian Document Format (ADF) document for Jira issue description.
  * Embeds exact authoritative coordinates, verified corridor, and equipment specs.
  */
@@ -172,6 +190,16 @@ export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resol
  * @param {object} [options] - Optional execution context { customJiraClient, storageOverride, caller, context, customAuthPolicy }
  */
 export async function createDispatchTicket(dispatchOrder, options = {}) {
+  // 0. Server-Side Killswitch Enforcement
+  // Enforced before authorization checks, KVS reads/writes, lease acquisition, reconciliation, or Jira API requests.
+  if (!LIVE_DISPATCH_ENABLED) {
+    const err = new Error(
+      'DELTA Field Dispatch is technically disabled on this deployment (Phase 0.7.2 KVS Smoke Test Mode). Automated Jira issue creation is blocked server-side.'
+    );
+    err.code = 'DISPATCH_FEATURE_DISABLED';
+    throw err;
+  }
+
   const { customJiraClient, storageOverride, caller, context, customAuthPolicy } = options;
 
   if (!dispatchOrder?.decisionId) {

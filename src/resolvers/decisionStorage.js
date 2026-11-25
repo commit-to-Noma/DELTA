@@ -116,8 +116,7 @@ export async function recordDecision(payload, storageOverride = null, authContex
     authContext?.accountId ||
     authContext?.principal?.accountId ||
     authContext?.context?.accountId ||
-    authContext?.context?.principal?.accountId ||
-    (typeof authContext === 'string' ? authContext : null);
+    authContext?.context?.principal?.accountId;
   const clientAccountId = payload?.humanApprover?.accountId;
 
   if (!serverAccountId || typeof serverAccountId !== 'string' || serverAccountId === 'anonymous') {

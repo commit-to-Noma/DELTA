@@ -93,7 +93,7 @@ export const AUTHORITATIVE_INTERVENTION_LOCATIONS = {
     accessCorridor: 'Longwood Ave → Brookline Ave South (Francis St ambulance approach clear)'
   },
   // Plan Alpha: Rapid deployable barrier along Francis Street roadway protecting BWH ambulance access
-  // Derived programmatically from OSM road feature ROAD-1377084984 (Francis St secondary corridor fronting emergency bay)
+  // Derived from intermediate centerline vertex (Node 1) of OSM road feature ROAD-1377084984 (Francis St secondary corridor fronting emergency bay)
   'plan-alpha': DERIVED_PLAN_ALPHA_LOCATION,
   // Plan Gamma / Choke: Fenway Emerald Necklace restriction point
   'plan-gamma': {
