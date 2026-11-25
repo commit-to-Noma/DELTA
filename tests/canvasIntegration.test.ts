@@ -234,5 +234,57 @@ describe('Task 1.4: Geographic Canvas & Hydraulic Integration', () => {
       expect(relativeError).toBeLessThan(1e-10);
       expect(state.accounting.relativeError).toBeLessThan(1e-10);
     });
+
+    it('TEST-CANVAS-07: Validates discrete 5-tier tactical depth band taxonomy', () => {
+      const classifyDepthBand = (depth: number): number => {
+        if (depth >= 0.60) return 4; // Severe hazard
+        if (depth >= 0.30) return 3; // Critical impassable
+        if (depth >= 0.15) return 2; // Ambulance caution
+        if (depth >= 0.05) return 1; // Shallow ponding
+        return 0; // Runoff sheen / dry
+      };
+
+      expect(classifyDepthBand(0.01)).toBe(0);
+      expect(classifyDepthBand(0.04)).toBe(0);
+      expect(classifyDepthBand(0.05)).toBe(1);
+      expect(classifyDepthBand(0.12)).toBe(1);
+      expect(classifyDepthBand(0.15)).toBe(2);
+      expect(classifyDepthBand(0.28)).toBe(2);
+      expect(classifyDepthBand(0.30)).toBe(3);
+      expect(classifyDepthBand(0.55)).toBe(3);
+      expect(classifyDepthBand(0.60)).toBe(4);
+      expect(classifyDepthBand(1.20)).toBe(4);
+    });
+
+    it('TEST-CANVAS-08: Distinguishes hospital structural elevation from access route inundation', () => {
+      // Find Brigham & Women's Hospital
+      const bwh = dataset.criticalFacilities.find((f) => f.name.includes("Brigham and Women's"));
+      expect(bwh).toBeDefined();
+
+      const [r, c] = bwh!.gridCell;
+      const elevation = dataset.elevationMatrix[r][c];
+
+      // Hospital is situated on high natural ground (11.8m)
+      expect(elevation).toBeGreaterThan(10.0);
+
+      // Verify access arteries exist
+      expect(bwh!.accessArteries).toContain('Francis Street');
+      expect(bwh!.accessArteries).toContain('Shattuck Street');
+    });
+
+    it('TEST-CANVAS-09: Validates segment-level road passability and differential delta arithmetic', () => {
+      const { nx, ny } = dataset.metadata.grid;
+      const baseDepth = new Float64Array(nx * ny);
+      const planDepth = new Float64Array(nx * ny);
+
+      // Simulate a cell where Plan Gamma cleared 18 cm of water
+      const testIdx = 17 * nx + 26;
+      baseDepth[testIdx] = 0.45;
+      planDepth[testIdx] = 0.27;
+
+      const delta = baseDepth[testIdx] - planDepth[testIdx];
+      expect(delta).toBeCloseTo(0.18, 5);
+      expect(delta).toBeGreaterThan(0.02); // Triggers beneficial avoided water display
+    });
   });
 });

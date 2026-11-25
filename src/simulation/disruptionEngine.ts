@@ -33,11 +33,23 @@ export interface DisruptionScenario {
   effectiveCapacityM3PerSec: number;
 }
 
+export interface HospitalAccessRouteDetail {
+  roadName: string;
+  maxDepthM: number;
+  status: 'PASSABLE' | 'CAUTION' | 'IMPASSABLE';
+}
+
 export interface HospitalImpact {
   name: string;
   gridCell: [number, number];
   waterDepthM: number;
   status: 'ACCESSIBLE' | 'CAUTION_PERIMETER_PONDING' | 'ISOLATED_INUNDATION';
+  campusGroundElevationM?: number;
+  buildingStandingWaterDepthM?: number;
+  perimeterMaxDepthM?: number;
+  accessRoutesStatus?: HospitalAccessRouteDetail[];
+  overallRoutePassability?: 'PASSABLE' | 'CAUTION' | 'IMPASSABLE';
+  accessStatusDescription?: string;
 }
 
 export interface RoadPassabilityImpact {
@@ -46,6 +58,11 @@ export interface RoadPassabilityImpact {
   maxDepthM: number;
   status: 'DRY_PASSABLE' | 'CAUTION_MINOR_PONDING' | 'CRITICAL_IMPASSABLE';
   newlyImpassable: boolean;
+  averageDepthM?: number;
+  passableCellCount?: number;
+  cautionCellCount?: number;
+  impassableCellCount?: number;
+  totalCellCount?: number;
 }
 
 export interface DisruptionRecalculationResult {
@@ -130,32 +147,103 @@ export const AUTHORITATIVE_DISRUPTIONS: DisruptionScenario[] = [
 
 /**
  * Evaluates passability of hospital access nodes based on depth grid.
+ * Clearly separates structural building flooding from access road compromise.
  */
 export function evaluateHospitalAccess(
   dataset: BostonCatchmentDataset,
   waterDepth: Float64Array
 ): HospitalImpact[] {
-  const { nx } = dataset.metadata.grid;
+  const { nx, ny } = dataset.metadata.grid;
+
   return dataset.criticalFacilities.map((fac) => {
     const [r, c] = fac.gridCell;
     const depthM = waterDepth[r * nx + c] || 0;
+    const campusElev = dataset.elevationMatrix[r]?.[c] ?? 0;
+
+    // Check perimeter 8-neighborhood
+    let perimeterMax = 0;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < ny && nc >= 0 && nc < nx) {
+          const pd = waterDepth[nr * nx + nc] || 0;
+          if (pd > perimeterMax) perimeterMax = pd;
+        }
+      }
+    }
+
+    // Check named access arteries
+    const accessRoutesStatus: HospitalAccessRouteDetail[] = fac.accessArteries.map((arteryName) => {
+      let arteryMaxDepth = 0;
+      for (const road of dataset.criticalRoads) {
+        if (road.name.toLowerCase().includes(arteryName.toLowerCase()) || arteryName.toLowerCase().includes(road.name.toLowerCase())) {
+          for (const [rr, cc] of road.gridCells) {
+            const rd = waterDepth[rr * nx + cc] || 0;
+            if (rd > arteryMaxDepth) arteryMaxDepth = rd;
+          }
+        }
+      }
+      let routeStatus: HospitalAccessRouteDetail['status'] = 'PASSABLE';
+      if (arteryMaxDepth >= 0.30) {
+        routeStatus = 'IMPASSABLE';
+      } else if (arteryMaxDepth >= 0.15) {
+        routeStatus = 'CAUTION';
+      }
+      return {
+        roadName: arteryName,
+        maxDepthM: Math.round(arteryMaxDepth * 1000) / 1000,
+        status: routeStatus,
+      };
+    });
+
+    const hasImpassableRoute = accessRoutesStatus.some((r) => r.status === 'IMPASSABLE');
+    const hasCautionRoute = accessRoutesStatus.some((r) => r.status === 'CAUTION');
+
+    let overallRoutePassability: HospitalImpact['overallRoutePassability'] = 'PASSABLE';
+    if (hasImpassableRoute) {
+      overallRoutePassability = 'IMPASSABLE';
+    } else if (hasCautionRoute) {
+      overallRoutePassability = 'CAUTION';
+    }
+
+    // Determine status (preserving existing test expectations where depthM >= 0.30 triggers ISOLATED_INUNDATION)
     let status: HospitalImpact['status'] = 'ACCESSIBLE';
-    if (depthM >= 0.30) {
+    if (depthM >= 0.30 || hasImpassableRoute) {
       status = 'ISOLATED_INUNDATION';
-    } else if (depthM >= 0.10) {
+    } else if (depthM >= 0.10 || hasCautionRoute || perimeterMax >= 0.15) {
       status = 'CAUTION_PERIMETER_PONDING';
     }
+
+    // Descriptive engineering note
+    let accessStatusDescription = 'Facility building dry and structurally accessible across all primary corridors.';
+    if (depthM >= 0.30) {
+      accessStatusDescription = `Severe direct flooding at facility coordinate (${(depthM * 100).toFixed(1)} cm). Structural hazard.`;
+    } else if (hasImpassableRoute) {
+      const blockedRoads = accessRoutesStatus.filter((r) => r.status === 'IMPASSABLE').map((r) => r.roadName).join(', ');
+      accessStatusDescription = `Campus building structurally dry (${(depthM * 100).toFixed(1)} cm water, elev ${campusElev.toFixed(1)}m). Access artery impassable (>30 cm): ${blockedRoads}.`;
+    } else if (hasCautionRoute) {
+      accessStatusDescription = `Campus building structurally dry; minor ponding on ingress corridors (15-30 cm). Ambulance caution.`;
+    }
+
     return {
       name: fac.name,
       gridCell: fac.gridCell,
       waterDepthM: Math.round(depthM * 1000) / 1000,
-      status
+      status,
+      campusGroundElevationM: Math.round(campusElev * 100) / 100,
+      buildingStandingWaterDepthM: Math.round(depthM * 1000) / 1000,
+      perimeterMaxDepthM: Math.round(perimeterMax * 1000) / 1000,
+      accessRoutesStatus,
+      overallRoutePassability,
+      accessStatusDescription,
     };
   });
 }
 
 /**
- * Evaluates road passability across critical emergency corridors.
+ * Evaluates road passability across critical emergency corridors with cell-by-cell breakdown.
  */
 export function evaluateRoadPassability(
   dataset: BostonCatchmentDataset,
@@ -167,10 +255,23 @@ export function evaluateRoadPassability(
 
   for (const road of dataset.criticalRoads) {
     let maxDepth = 0;
+    let sumDepth = 0;
+    let passableCount = 0;
+    let cautionCount = 0;
+    let impassableCount = 0;
+
     for (const [r, c] of road.gridCells) {
       const d = waterDepth[r * nx + c] || 0;
       if (d > maxDepth) maxDepth = d;
+      sumDepth += d;
+
+      if (d >= 0.30) impassableCount++;
+      else if (d >= 0.15) cautionCount++;
+      else passableCount++;
     }
+
+    const totalCells = road.gridCells.length;
+    const avgDepth = totalCells > 0 ? sumDepth / totalCells : 0;
 
     let status: RoadPassabilityImpact['status'] = 'DRY_PASSABLE';
     if (maxDepth >= 0.30) {
@@ -186,7 +287,12 @@ export function evaluateRoadPassability(
       name: road.name,
       maxDepthM: Math.round(maxDepth * 1000) / 1000,
       status,
-      newlyImpassable: isNewlyImpassable
+      newlyImpassable: isNewlyImpassable,
+      averageDepthM: Math.round(avgDepth * 1000) / 1000,
+      passableCellCount: passableCount,
+      cautionCellCount: cautionCount,
+      impassableCellCount: impassableCount,
+      totalCellCount: totalCells,
     });
   }
 

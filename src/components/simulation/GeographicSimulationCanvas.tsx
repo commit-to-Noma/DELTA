@@ -3,11 +3,39 @@ import type {
   BostonCatchmentDataset,
   CriticalFacility,
   ModelledDrainageInlet,
+  RoadSegment,
 } from '../../data/catchmentLoader';
 import {
   gridToProjected,
   gridToLatLon,
 } from '../../data/catchmentLoader';
+
+export interface HospitalExposureInfo {
+  facility: CriticalFacility;
+  campusGroundElevationM: number;
+  buildingStandingWaterDepthM: number;
+  isBuildingDry: boolean;
+  perimeterMaxDepthM: number;
+  accessRoutes: {
+    roadName: string;
+    maxDepthM: number;
+    status: 'PASSABLE' | 'CAUTION' | 'IMPASSABLE';
+  }[];
+  overallStatus: 'FULLY_ACCESSIBLE' | 'CAUTION_ACCESS_RESTRICTED' | 'ACCESS_COMPROMISED_ISOLATED';
+  summaryText: string;
+}
+
+export interface RoadCorridorInfo {
+  road: RoadSegment;
+  maxDepthM: number;
+  averageDepthM: number;
+  impassableCellsCount: number;
+  cautionCellsCount: number;
+  passableCellsCount: number;
+  totalCellsCount: number;
+  connectedHospitals: string[];
+  passability: 'PASSABLE' | 'CAUTION' | 'IMPASSABLE';
+}
 
 export interface CellHoverInfo {
   row: number;
@@ -24,6 +52,10 @@ export interface CellHoverInfo {
   roadName?: string;
   drainageInlet?: ModelledDrainageInlet;
   passabilityStatus: 'DRY_PASSABLE' | 'CAUTION_MINOR_PONDING' | 'CRITICAL_IMPASSABLE';
+  depthBand?: number; // 0, 1, 2, 3, 4
+  deltaWaterDepthM?: number; // water avoided vs baseline
+  hospitalExposure?: HospitalExposureInfo;
+  roadCorridor?: RoadCorridorInfo;
 }
 
 export interface CanvasLayerVisibility {
@@ -35,26 +67,39 @@ export interface CanvasLayerVisibility {
   roads: boolean;
   facilities: boolean;
   drainage: boolean;
+  legend?: boolean;
 }
 
-interface GeographicSimulationCanvasProps {
+export interface GeographicSimulationCanvasProps {
   className?: string;
   dataset: BostonCatchmentDataset;
   waterDepth: Float64Array; // length 4096
+  baselineWaterDepth?: Float64Array | null; // optional for delta comparison mode
+  viewMode?: 'standard' | 'delta'; // 'standard' = actual flood depth, 'delta' = avoided floodwater vs baseline
   activeLayers: CanvasLayerVisibility;
   selectedCell?: { row: number; col: number } | null;
+  selectedRoadId?: string | null;
+  selectedFacilityId?: string | null;
   onCellHover?: (info: CellHoverInfo | null) => void;
   onCellClick?: (info: CellHoverInfo) => void;
+  onSelectRoad?: (road: RoadSegment | null) => void;
+  onSelectFacility?: (facility: CriticalFacility | null) => void;
 }
 
 export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProps> = ({
   className = '',
   dataset,
   waterDepth,
+  baselineWaterDepth = null,
+  viewMode = 'standard',
   activeLayers,
   selectedCell,
+  selectedRoadId,
+  selectedFacilityId,
   onCellHover,
   onCellClick,
+  onSelectRoad,
+  onSelectFacility,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -100,7 +145,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     return map;
   }, [dataset.modelledDrainageInlets]);
 
-  // Pre-index road segments by cell [r, c]
+  // Pre-index road segments by cell [r, c] and map road names
   const roadCellMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const r of dataset.criticalRoads) {
@@ -112,6 +157,144 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     }
     return map;
   }, [dataset.criticalRoads]);
+
+  // Evaluate rich hospital exposure details
+  const getHospitalExposure = useCallback(
+    (facility: CriticalFacility): HospitalExposureInfo => {
+      const [r, c] = facility.gridCell;
+      const campusGroundElevationM = dataset.elevationMatrix[r]?.[c] ?? 0;
+      const buildingStandingWaterDepthM = waterDepth[r * nx + c] || 0;
+      const isBuildingDry = buildingStandingWaterDepthM < 0.05;
+
+      // 8-neighborhood perimeter depth
+      let perimeterMaxDepthM = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = r + dr;
+          const nc = c + dc;
+          if (nr >= 0 && nr < ny && nc >= 0 && nc < nx) {
+            const pd = waterDepth[nr * nx + nc] || 0;
+            if (pd > perimeterMaxDepthM) perimeterMaxDepthM = pd;
+          }
+        }
+      }
+
+      // Check each named access artery
+      const accessRoutes = facility.accessArteries.map((arteryName) => {
+        let maxDepthM = 0;
+        for (const road of dataset.criticalRoads) {
+          if (
+            road.name.toLowerCase().includes(arteryName.toLowerCase()) ||
+            arteryName.toLowerCase().includes(road.name.toLowerCase())
+          ) {
+            for (const [rr, cc] of road.gridCells) {
+              const rd = waterDepth[rr * nx + cc] || 0;
+              if (rd > maxDepthM) maxDepthM = rd;
+            }
+          }
+        }
+        let status: 'PASSABLE' | 'CAUTION' | 'IMPASSABLE' = 'PASSABLE';
+        if (maxDepthM >= 0.30) {
+          status = 'IMPASSABLE';
+        } else if (maxDepthM >= 0.15) {
+          status = 'CAUTION';
+        }
+        return {
+          roadName: arteryName,
+          maxDepthM: Math.round(maxDepthM * 1000) / 1000,
+          status,
+        };
+      });
+
+      const hasImpassable = accessRoutes.some((a) => a.status === 'IMPASSABLE');
+      const hasCaution = accessRoutes.some((a) => a.status === 'CAUTION');
+
+      let overallStatus: HospitalExposureInfo['overallStatus'] = 'FULLY_ACCESSIBLE';
+      if (hasImpassable) {
+        overallStatus = 'ACCESS_COMPROMISED_ISOLATED';
+      } else if (hasCaution || perimeterMaxDepthM >= 0.15) {
+        overallStatus = 'CAUTION_ACCESS_RESTRICTED';
+      }
+
+      let summaryText = 'Facility ground floor structurally dry (elev ' + campusGroundElevationM.toFixed(1) + 'm). All primary access corridors clear.';
+      if (buildingStandingWaterDepthM >= 0.30) {
+        summaryText = `Direct structural flooding at facility (${(buildingStandingWaterDepthM * 100).toFixed(1)} cm). High risk.`;
+      } else if (hasImpassable) {
+        const blocked = accessRoutes.filter((a) => a.status === 'IMPASSABLE').map((a) => a.roadName).join(', ');
+        summaryText = `Facility building structurally dry (${(buildingStandingWaterDepthM * 100).toFixed(1)} cm water, elev ${campusGroundElevationM.toFixed(1)}m). Access artery impassable (>30 cm): ${blocked}.`;
+      } else if (hasCaution) {
+        summaryText = `Facility building dry. Minor perimeter ponding (15-30 cm) on ingress routes. Ambulance caution.`;
+      }
+
+      return {
+        facility,
+        campusGroundElevationM: Math.round(campusGroundElevationM * 100) / 100,
+        buildingStandingWaterDepthM: Math.round(buildingStandingWaterDepthM * 1000) / 1000,
+        isBuildingDry,
+        perimeterMaxDepthM: Math.round(perimeterMaxDepthM * 1000) / 1000,
+        accessRoutes,
+        overallStatus,
+        summaryText,
+      };
+    },
+    [dataset.criticalRoads, dataset.elevationMatrix, nx, ny, waterDepth]
+  );
+
+  // Evaluate rich road corridor info
+  const getRoadCorridorInfo = useCallback(
+    (road: RoadSegment): RoadCorridorInfo => {
+      let maxDepth = 0;
+      let sumDepth = 0;
+      let passable = 0;
+      let caution = 0;
+      let impassable = 0;
+
+      for (const [r, c] of road.gridCells) {
+        const d = waterDepth[r * nx + c] || 0;
+        if (d > maxDepth) maxDepth = d;
+        sumDepth += d;
+
+        if (d >= 0.30) impassable++;
+        else if (d >= 0.15) caution++;
+        else passable++;
+      }
+
+      const total = road.gridCells.length;
+      const averageDepthM = total > 0 ? sumDepth / total : 0;
+
+      let passability: RoadCorridorInfo['passability'] = 'PASSABLE';
+      if (maxDepth >= 0.30) passability = 'IMPASSABLE';
+      else if (maxDepth >= 0.15) passability = 'CAUTION';
+
+      // Find hospitals linked to this road
+      const connectedHospitals: string[] = [];
+      for (const fac of dataset.criticalFacilities) {
+        if (
+          fac.accessArteries.some(
+            (artery) =>
+              road.name.toLowerCase().includes(artery.toLowerCase()) ||
+              artery.toLowerCase().includes(road.name.toLowerCase())
+          )
+        ) {
+          connectedHospitals.push(fac.name);
+        }
+      }
+
+      return {
+        road,
+        maxDepthM: Math.round(maxDepth * 1000) / 1000,
+        averageDepthM: Math.round(averageDepthM * 1000) / 1000,
+        impassableCellsCount: impassable,
+        cautionCellsCount: caution,
+        passableCellsCount: passable,
+        totalCellsCount: total,
+        connectedHospitals,
+        passability,
+      };
+    },
+    [dataset.criticalFacilities, nx, waterDepth]
+  );
 
   // Helper to extract full cell information
   const getCellInfo = useCallback(
@@ -125,11 +308,38 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       const drainageInlet = drainageCellMap.get(`${row},${col}`);
       const roadName = roadCellMap.get(`${row},${col}`);
 
+      // Discrete depth band: 0 (<5cm), 1 (5-15cm), 2 (15-30cm), 3 (30-60cm), 4 (>=60cm)
+      let depthBand = 0;
+      if (depth >= 0.60) depthBand = 4;
+      else if (depth >= 0.30) depthBand = 3;
+      else if (depth >= 0.15) depthBand = 2;
+      else if (depth >= 0.05) depthBand = 1;
+
+      // Passability status
       let passabilityStatus: CellHoverInfo['passabilityStatus'] = 'DRY_PASSABLE';
       if (depth >= 0.30) {
         passabilityStatus = 'CRITICAL_IMPASSABLE';
       } else if (depth >= 0.10) {
         passabilityStatus = 'CAUTION_MINOR_PONDING';
+      }
+
+      // Delta comparison calculation
+      let deltaWaterDepthM: number | undefined;
+      if (baselineWaterDepth) {
+        const baseD = baselineWaterDepth[cellIndex] || 0;
+        deltaWaterDepthM = Math.round((baseD - depth) * 1000) / 1000;
+      }
+
+      // Rich hospital exposure
+      const hospitalExposure = facility ? getHospitalExposure(facility) : undefined;
+
+      // Rich road corridor info
+      let roadCorridor: RoadCorridorInfo | undefined;
+      if (roadName) {
+        const matchingRoad = dataset.criticalRoads.find((r) => r.name === roadName);
+        if (matchingRoad) {
+          roadCorridor = getRoadCorridorInfo(matchingRoad);
+        }
       }
 
       return {
@@ -147,20 +357,30 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         roadName,
         drainageInlet,
         passabilityStatus,
+        depthBand,
+        deltaWaterDepthM,
+        hospitalExposure,
+        roadCorridor,
       };
     },
-    [dataset.elevationMatrix, drainageCellMap, facilityCellMap, nx, roadCellMap, waterDepth]
+    [
+      baselineWaterDepth,
+      dataset.criticalRoads,
+      dataset.elevationMatrix,
+      drainageCellMap,
+      facilityCellMap,
+      getHospitalExposure,
+      getRoadCorridorInfo,
+      nx,
+      roadCellMap,
+      waterDepth,
+    ]
   );
 
-  // Hypsometric elevation coloring function (Serious Tactical DELTA Palette)
+  // Hypsometric elevation coloring function
   const getElevationColor = useCallback(
     (z: number): string => {
       const norm = Math.max(0, Math.min(1, (z - minElevationM) / (maxElevationM - minElevationM)));
-      // Low (riverbed / basin): Deep onyx / slate (#0a0f14)
-      // Mid-low: Charcoal storm grey (#17202b)
-      // Mid: Deep stone (#243140)
-      // High: Granite slate (#425366)
-      // Peak: Slate stone (#697d94)
       const r = Math.round(10 + norm * 80);
       const g = Math.round(15 + norm * 95);
       const b = Math.round(20 + norm * 115);
@@ -200,7 +420,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.fillStyle = '#080c10'; // Onyx-950
     ctx.fillRect(0, 0, width, height);
 
-    // 1b. Render Genuine USGS Satellite Imagery Still (USGS National Map Imagery Only)
+    // 1b. Render Satellite Imagery Still (if enabled)
     if (activeLayers.satellite && satelliteImage) {
       ctx.drawImage(satelliteImage, originX, originY, displaySize, displaySize);
     }
@@ -211,7 +431,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         for (let c = 0; c < nx; c++) {
           const z = dataset.elevationMatrix[r][c];
           ctx.fillStyle = activeLayers.satellite
-            ? 'rgba(0, 0, 0, 0.25)' // When satellite is active, subtle overlay
+            ? 'rgba(0, 0, 0, 0.25)'
             : getElevationColor(z);
           ctx.fillRect(originX + c * cellSize, originY + r * cellSize, cellSize + 0.4, cellSize + 0.4);
         }
@@ -220,7 +440,6 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       ctx.fillStyle = '#111822';
       ctx.fillRect(originX, originY, displaySize, displaySize);
     }
-
 
     // 3. Render Topographic Contour Lines (Every 5 meters)
     if (activeLayers.contours) {
@@ -234,7 +453,6 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
           const z10 = dataset.elevationMatrix[r][c + 1];
           const z01 = dataset.elevationMatrix[r + 1][c];
 
-          // Check if contour line crosses cell boundary
           const level0 = Math.floor(z00 / contourInterval) * contourInterval;
           const level1 = Math.floor(z10 / contourInterval) * contourInterval;
           const level2 = Math.floor(z01 / contourInterval) * contourInterval;
@@ -249,47 +467,82 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       }
     }
 
-    // 4. Render Simulated Overland Flood Water (Smooth Fluid Rendering)
+    // 4. Render Overland Flood Water (Discrete Tactical Bands or Intervention Delta Mode)
     if (activeLayers.water) {
       ctx.save();
-      for (let r = 0; r < ny; r++) {
-        for (let c = 0; c < nx; c++) {
-          const idx = r * nx + c;
-          const h = waterDepth[idx];
 
-          if (h >= 0.04) {
-            const x = originX + c * cellSize;
-            const y = originY + r * cellSize;
-            const intensity = Math.min(1.0, (h - 0.04) / 0.70);
+      if (viewMode === 'delta' && baselineWaterDepth) {
+        // --- DELTA COMPARISON MODE (Avoided flood volume & drawdown) ---
+        for (let r = 0; r < ny; r++) {
+          for (let c = 0; c < nx; c++) {
+            const idx = r * nx + c;
+            const hBase = baselineWaterDepth[idx] || 0;
+            const hPlan = waterDepth[idx] || 0;
+            const delta = hBase - hPlan; // positive means plan avoided/reduced flood depth
 
-            // Vibrant fluid gradient: Cyan sheen -> Deep Cerulean -> Intense River Blue
-            const alpha = 0.50 + intensity * 0.40;
-            const rColor = Math.round(14 + (1 - intensity) * 30);
-            const gColor = Math.round(130 + (1 - intensity) * 80);
-            const bColor = 245;
+            if (Math.abs(delta) >= 0.02) {
+              const x = originX + c * cellSize;
+              const y = originY + r * cellSize;
 
-            ctx.fillStyle = `rgba(${rColor}, ${gColor}, ${bColor}, ${alpha})`;
+              if (delta > 0) {
+                // Beneficial floodwater reduction / avoided surface water (Plan win!)
+                // Emerald green to cyan gradient
+                const intensity = Math.min(1.0, (delta - 0.02) / 0.30);
+                const alpha = 0.45 + intensity * 0.45;
+                ctx.fillStyle = `rgba(16, 185, 129, ${alpha})`;
+                ctx.fillRect(x, y, cellSize, cellSize);
 
-            // Soft overlapping rounded parcels merge adjacent cells into natural fluid pools
-            const expand = cellSize * 0.35;
-            const rx = x - expand * 0.5;
-            const ry = y - expand * 0.5;
-            const rw = cellSize + expand;
-            const rh = cellSize + expand;
-            const radius = Math.min(rw, rh) * 0.35;
-
-            ctx.beginPath();
-            if (typeof ctx.roundRect === 'function') {
-              ctx.roundRect(rx, ry, rw, rh, radius);
-            } else {
-              ctx.rect(rx, ry, rw, rh);
+                if (delta >= 0.10) {
+                  ctx.strokeStyle = 'rgba(52, 211, 153, 0.6)';
+                  ctx.lineWidth = 1;
+                  ctx.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
+                }
+              } else {
+                // Local water deflection / accumulation (e.g. Behind sandbag barrier)
+                const intensity = Math.min(1.0, (Math.abs(delta) - 0.02) / 0.30);
+                const alpha = 0.40 + intensity * 0.40;
+                ctx.fillStyle = `rgba(245, 158, 11, ${alpha})`;
+                ctx.fillRect(x, y, cellSize, cellSize);
+              }
             }
-            ctx.fill();
+          }
+        }
+      } else {
+        // --- STANDARD MODE: DISCRETE TACTICAL DEPTH BANDS ---
+        for (let r = 0; r < ny; r++) {
+          for (let c = 0; c < nx; c++) {
+            const idx = r * nx + c;
+            const h = waterDepth[idx];
 
-            // Highlight deep flood hazard (> 0.30m impassable for ambulances)
-            if (h >= 0.30) {
-              ctx.fillStyle = 'rgba(239, 68, 68, 0.28)'; // Soft emergency hazard glow
-              ctx.fill();
+            if (h >= 0.02) {
+              const x = originX + c * cellSize;
+              const y = originY + r * cellSize;
+
+              // Tactical Discrete Band Color Assignment
+              if (h >= 0.60) {
+                // Band 4: Severe Hazard (>= 60 cm) - Deep Emergency Crimson
+                ctx.fillStyle = 'rgba(220, 38, 38, 0.92)';
+                ctx.fillRect(x, y, cellSize, cellSize);
+                ctx.strokeStyle = 'rgba(248, 113, 113, 0.8)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
+              } else if (h >= 0.30) {
+                // Band 3: Critical Impassable (30 - 60 cm) - Safety Amber/Orange-Red
+                ctx.fillStyle = 'rgba(249, 115, 22, 0.85)';
+                ctx.fillRect(x, y, cellSize, cellSize);
+              } else if (h >= 0.15) {
+                // Band 2: Moderate Ponding (15 - 30 cm) - Deep Cobalt Blue
+                ctx.fillStyle = 'rgba(37, 99, 235, 0.80)';
+                ctx.fillRect(x, y, cellSize, cellSize);
+              } else if (h >= 0.05) {
+                // Band 1: Shallow Accumulation (5 - 15 cm) - Sky Blue
+                ctx.fillStyle = 'rgba(56, 189, 248, 0.60)';
+                ctx.fillRect(x, y, cellSize, cellSize);
+              } else {
+                // Band 0: Surface Runoff Sheen (2 - 5 cm) - Faint Cerulean
+                ctx.fillStyle = 'rgba(14, 165, 233, 0.25)';
+                ctx.fillRect(x, y, cellSize, cellSize);
+              }
             }
           }
         }
@@ -298,12 +551,11 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     }
 
     // 5. Render Hydraulic Velocity / Gradient Vectors
-    if (activeLayers.vectors && activeLayers.water) {
+    if (activeLayers.vectors && activeLayers.water && viewMode === 'standard') {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.lineWidth = 1;
 
-      // Sample every 4th cell to avoid visual clutter
       for (let r = 2; r < ny - 2; r += 4) {
         for (let c = 2; c < nx - 2; c += 4) {
           const idx = r * nx + c;
@@ -315,9 +567,8 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
             const etaTop = dataset.elevationMatrix[r - 1][c] + waterDepth[(r - 1) * nx + c];
             const etaBottom = dataset.elevationMatrix[r + 1][c] + waterDepth[(r + 1) * nx + c];
 
-            // Downhill hydraulic gradient (-grad eta)
             const gradX = (etaLeft - etaRight) / (2 * 25.0);
-            const gradY = (etaTop - etaBottom) / (2 * 25.0); // positive gradY means flow downward in row index
+            const gradY = (etaTop - etaBottom) / (2 * 25.0);
 
             const mag = Math.hypot(gradX, gradY);
             if (mag > 0.0005) {
@@ -335,7 +586,6 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
               ctx.lineTo(endX, endY);
               ctx.stroke();
 
-              // Arrowhead
               const angle = Math.atan2(dirY, dirX);
               const headLen = 3;
               ctx.beginPath();
@@ -349,42 +599,65 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       }
     }
 
-    // 6. Render Road Network Corridors
+    // 6. Render Road Network Corridors (Segment-by-Segment Passability)
     if (activeLayers.roads) {
       for (const road of dataset.criticalRoads) {
         if (road.gridCells.length < 2) continue;
 
-        ctx.beginPath();
-        for (let i = 0; i < road.gridCells.length; i++) {
-          const [r, c] = road.gridCells[i];
-          const px = originX + (c + 0.5) * cellSize;
-          const py = originY + (r + 0.5) * cellSize;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+        const isRoadSelected = selectedRoadId === road.roadId;
+
+        // Draw selected road glowing halo
+        if (isRoadSelected) {
+          ctx.beginPath();
+          for (let i = 0; i < road.gridCells.length; i++) {
+            const [r, c] = road.gridCells[i];
+            const px = originX + (c + 0.5) * cellSize;
+            const py = originY + (r + 0.5) * cellSize;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.strokeStyle = 'rgba(249, 115, 22, 0.75)'; // Orange halo
+          ctx.lineWidth = 6.0;
+          ctx.stroke();
         }
 
-        // Highlight road status based on water depth
-        let maxWaterOnRoad = 0;
-        for (const [r, c] of road.gridCells) {
-          const d = waterDepth[r * nx + c] || 0;
-          if (d > maxWaterOnRoad) maxWaterOnRoad = d;
-        }
+        // Draw individual segments colored by local cell water depth
+        for (let i = 0; i < road.gridCells.length - 1; i++) {
+          const [r1, c1] = road.gridCells[i];
+          const [r2, c2] = road.gridCells[i + 1];
 
-        if (maxWaterOnRoad >= 0.30) {
-          // Severely submerged road
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)'; // Red-500
-          ctx.lineWidth = 2.5;
-        } else if (maxWaterOnRoad >= 0.10) {
-          // Warning ponding
-          ctx.strokeStyle = 'rgba(245, 158, 11, 0.75)'; // Amber-500
-          ctx.lineWidth = 2.0;
-        } else {
-          // Passable road
-          ctx.strokeStyle = road.highwayType === 'primary' ? 'rgba(248, 250, 252, 0.60)' : 'rgba(148, 163, 184, 0.45)';
-          ctx.lineWidth = road.highwayType === 'primary' ? 1.8 : 1.2;
-        }
+          const d1 = waterDepth[r1 * nx + c1] || 0;
+          const d2 = waterDepth[r2 * nx + c2] || 0;
+          const segDepth = Math.max(d1, d2);
 
-        ctx.stroke();
+          const p1x = originX + (c1 + 0.5) * cellSize;
+          const p1y = originY + (r1 + 0.5) * cellSize;
+          const p2x = originX + (c2 + 0.5) * cellSize;
+          const p2y = originY + (r2 + 0.5) * cellSize;
+
+          ctx.beginPath();
+          ctx.moveTo(p1x, p1y);
+          ctx.lineTo(p2x, p2y);
+
+          if (segDepth >= 0.30) {
+            // Impassable submerged corridor
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.95)'; // Red-500
+            ctx.lineWidth = 2.8;
+          } else if (segDepth >= 0.15) {
+            // Ambulance Caution ponding
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.90)'; // Amber-500
+            ctx.lineWidth = 2.2;
+          } else {
+            // Fully passable corridor
+            ctx.strokeStyle =
+              road.highwayType === 'primary'
+                ? 'rgba(248, 250, 252, 0.70)'
+                : 'rgba(148, 163, 184, 0.45)';
+            ctx.lineWidth = road.highwayType === 'primary' ? 1.8 : 1.2;
+          }
+
+          ctx.stroke();
+        }
       }
     }
 
@@ -395,54 +668,96 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         const px = originX + (c + 0.5) * cellSize;
         const py = originY + (r + 0.5) * cellSize;
 
+        const isBrooklineCulvert = inlet.inletId === 'CULVERT-01-BROOKLINE' || (r === 17 && c === 26);
+
         // Outer glow
-        ctx.fillStyle = 'rgba(6, 182, 212, 0.25)'; // Cyan glow
+        ctx.fillStyle = isBrooklineCulvert ? 'rgba(249, 115, 22, 0.35)' : 'rgba(6, 182, 212, 0.25)';
         ctx.beginPath();
         ctx.arc(px, py, cellSize * 1.8, 0, Math.PI * 2);
         ctx.fill();
 
         // Core marker (diamond shape)
-        ctx.fillStyle = '#06b6d4'; // Cyan-500
+        ctx.fillStyle = isBrooklineCulvert ? '#f97316' : '#06b6d4';
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.moveTo(px, py - 4);
-        ctx.lineTo(px + 4, py);
-        ctx.lineTo(px, py + 4);
-        ctx.lineTo(px - 4, py);
+        ctx.moveTo(px, py - 5);
+        ctx.lineTo(px + 5, py);
+        ctx.lineTo(px, py + 5);
+        ctx.lineTo(px - 5, py);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
       }
     }
 
-    // 8. Render 5 Critical Medical Facilities
+    // 8. Render 5 Critical Medical Facilities (Hospital Exposure Distinction)
     if (activeLayers.facilities) {
       for (const fac of dataset.criticalFacilities) {
         const [r, c] = fac.gridCell;
         const px = originX + (c + 0.5) * cellSize;
         const py = originY + (r + 0.5) * cellSize;
 
-        // Facility Marker
-        ctx.fillStyle = fac.emergency ? '#ef4444' : '#3b82f6';
+        const isFacilitySelected = selectedFacilityId === fac.facilityId;
+        const hospitalExp = getHospitalExposure(fac);
+
+        // Outer Status Ring: Warning dashed ring if access compromised, green if accessible
+        if (hospitalExp.overallStatus === 'ACCESS_COMPROMISED_ISOLATED') {
+          ctx.strokeStyle = '#f59e0b'; // Amber alert ring
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([3, 2]);
+          ctx.beginPath();
+          ctx.arc(px, py, cellSize * 1.5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (hospitalExp.overallStatus === 'CAUTION_ACCESS_RESTRICTED') {
+          ctx.strokeStyle = '#38bdf8'; // Sky blue caution ring
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(px, py, cellSize * 1.4, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)'; // Green accessible ring
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(px, py, cellSize * 1.3, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Selected halo
+        if (isFacilitySelected) {
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(px - 9, py - 9, 18, 18);
+        }
+
+        // Campus Badge: Structurally dry building is marked with blue/emerald badge
+        ctx.fillStyle = hospitalExp.isBuildingDry ? '#1e40af' : '#b91c1c';
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
 
-        // Medical Badge
-        const bSize = 6;
+        const bSize = 6.5;
         ctx.fillRect(px - bSize, py - bSize, bSize * 2, bSize * 2);
         ctx.strokeRect(px - bSize, py - bSize, bSize * 2, bSize * 2);
 
         // White cross inside badge
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(px - 1, py - 3.5, 2, 7);
-        ctx.fillRect(px - 3.5, py - 1, 7, 2);
+        ctx.fillRect(px - 1, py - 4, 2, 8);
+        ctx.fillRect(px - 4, py - 1, 8, 2);
 
-        // Facility Name Label
-        ctx.font = '10px monospace';
-        ctx.fillStyle = '#f8fafc';
+        // Facility Name Label with High-Contrast Background
+        ctx.font = 'bold 9.5px monospace';
         const label = fac.name.replace('Beth Israel Deaconess Medical Center', 'BIDMC').replace(' Hospital', '');
-        ctx.fillText(label, px + 9, py + 3);
+        const textWidth = ctx.measureText(label).width;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(px + 10, py - 6, textWidth + 6, 14);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(px + 10, py - 6, textWidth + 6, 14);
+
+        ctx.fillStyle = hospitalExp.overallStatus === 'ACCESS_COMPROMISED_ISOLATED' ? '#fde047' : '#f8fafc';
+        ctx.fillText(label, px + 13, py + 4);
       }
     }
 
@@ -454,12 +769,10 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         const px = originX + col * cellSize;
         const py = originY + row * cellSize;
 
-        // Highlight Cell Boundary
         ctx.strokeStyle = '#f97316'; // Safety orange
         ctx.lineWidth = 1.5;
         ctx.strokeRect(px, py, cellSize, cellSize);
 
-        // Crosshairs extending to borders
         ctx.strokeStyle = 'rgba(249, 115, 22, 0.25)';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -471,12 +784,12 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       }
     }
 
-    // 10. Draw Computational Boundary Frame & Spatial Metadata
+    // 10. Computational Boundary Frame & Spatial Metadata
     ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
     ctx.lineWidth = 1;
     ctx.strokeRect(originX, originY, displaySize, displaySize);
 
-    // Coordinate tick labels on border (EPSG:26986 Projected Meters)
+    // Coordinate tick labels on border
     ctx.font = '9px monospace';
     ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
     ctx.fillText(`X:${Math.round(xmin)}m`, originX, originY - 6);
@@ -500,7 +813,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.fillText('N', compX - 3, compY - 12);
 
     // Metric Scale Bar (400 meters)
-    const scaleBarM = 400; // 400 meters
+    const scaleBarM = 400;
     const scaleBarPx = (scaleBarM / 1600.0) * displaySize;
     const scaleX = originX + 12;
     const scaleY = originY + displaySize - 12;
@@ -514,7 +827,6 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.lineTo(scaleX + scaleBarPx, scaleY);
     ctx.stroke();
 
-    // Scale ticks
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(scaleX, scaleY - 3);
@@ -526,23 +838,103 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.font = '9px monospace';
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(`${scaleBarM}m (EPSG:26986)`, scaleX + 4, scaleY - 5);
+
+    // 11. Docked On-Canvas Tactical Legend (if activeLayers.legend !== false)
+    if (activeLayers.legend !== false) {
+      const legW = 175;
+      const legH = viewMode === 'delta' ? 120 : 155;
+      const legX = originX + displaySize - legW - 10;
+      const legY = originY + displaySize - legH - 10;
+
+      // Legend Backdrop
+      ctx.fillStyle = 'rgba(8, 12, 16, 0.90)';
+      ctx.fillRect(legX, legY, legW, legH);
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(legX, legY, legW, legH);
+
+      // Legend Header
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = '#f97316';
+      ctx.fillText(viewMode === 'delta' ? 'DELTA: AVOIDED FLOOD' : 'TACTICAL DEPTH BANDS', legX + 8, legY + 14);
+
+      ctx.font = '8.5px monospace';
+      if (viewMode === 'delta') {
+        // Delta mode swatches
+        let currY = legY + 28;
+        const deltaItems = [
+          { color: 'rgba(16, 185, 129, 0.85)', label: 'Avoided Volume (Plan)' },
+          { color: 'rgba(245, 158, 11, 0.85)', label: 'Deflected Ponding' },
+          { color: 'rgba(148, 163, 184, 0.30)', label: 'Unchanged Domain' },
+        ];
+        for (const item of deltaItems) {
+          ctx.fillStyle = item.color;
+          ctx.fillRect(legX + 8, currY - 6, 10, 8);
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(item.label, legX + 24, currY);
+          currY += 16;
+        }
+
+        // Subtext
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '7.5px monospace';
+        ctx.fillText('Shows depth reduction vs baseline', legX + 8, legY + legH - 8);
+      } else {
+        // Standard Depth Bands
+        let currY = legY + 28;
+        const bands = [
+          { color: 'rgba(220, 38, 38, 0.95)', label: '≥ 60cm (Severe Danger)' },
+          { color: 'rgba(249, 115, 22, 0.88)', label: '30–60cm (Impassable)' },
+          { color: 'rgba(37, 99, 235, 0.82)', label: '15–30cm (Caution)' },
+          { color: 'rgba(56, 189, 248, 0.65)', label: '5–15cm (Shallow)' },
+          { color: 'rgba(14, 165, 233, 0.30)', label: '< 5cm (Runoff Sheen)' },
+        ];
+        for (const b of bands) {
+          ctx.fillStyle = b.color;
+          ctx.fillRect(legX + 8, currY - 6, 10, 8);
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(b.label, legX + 24, currY);
+          currY += 15;
+        }
+
+        // Road indicators
+        currY += 4;
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText('ROADS: ', legX + 8, currY);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillText('■<15cm ', legX + 50, currY);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillText('■15-30 ', legX + 92, currY);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText('■>30cm', legX + 132, currY);
+
+        currY += 13;
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText('✚ Hospital: Dry Campus / Monitored', legX + 8, currY);
+      }
+    }
   }, [
     activeLayers,
+    baselineWaterDepth,
     dataset,
     getElevationColor,
+    getHospitalExposure,
+    internalHover,
     nx,
     ny,
     satelliteImage,
-    waterDepth,
-    internalHover,
     selectedCell,
-    xmin,
+    selectedFacilityId,
+    selectedRoadId,
+    viewMode,
+    waterDepth,
     xmax,
-    ymin,
+    xmin,
     ymax,
+    ymin,
   ]);
 
-  // Handle Mouse Events for Hover and Selection
+  // Handle Mouse Events for Hover and Feature Selection
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -587,7 +979,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas || !onCellClick) return;
+    if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
     const clientX = e.clientX - rect.left;
@@ -608,11 +1000,53 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     const relY = clientY - originY;
 
     if (relX >= 0 && relX < displaySize && relY >= 0 && relY < displaySize) {
+      // 1. Check if clicked near a hospital facility
+      for (const fac of dataset.criticalFacilities) {
+        const facPx = (fac.gridCell[1] + 0.5) * cellSize;
+        const facPy = (fac.gridCell[0] + 0.5) * cellSize;
+        if (Math.hypot(relX - facPx, relY - facPy) <= 15) {
+          if (onSelectFacility) onSelectFacility(fac);
+          const info = getCellInfo(fac.gridCell[0], fac.gridCell[1]);
+          if (onCellClick) onCellClick(info);
+          return;
+        }
+      }
+
+      // 2. Check if clicked near a road corridor
+      for (const road of dataset.criticalRoads) {
+        for (let i = 0; i < road.gridCells.length - 1; i++) {
+          const [r1, c1] = road.gridCells[i];
+          const [r2, c2] = road.gridCells[i + 1];
+          const p1x = (c1 + 0.5) * cellSize;
+          const p1y = (r1 + 0.5) * cellSize;
+          const p2x = (c2 + 0.5) * cellSize;
+          const p2y = (r2 + 0.5) * cellSize;
+
+          // Distance from point to line segment
+          const l2 = Math.hypot(p2x - p1x, p2y - p1y) ** 2;
+          let t = l2 === 0 ? 0 : ((relX - p1x) * (p2x - p1x) + (relY - p1y) * (p2y - p1y)) / l2;
+          t = Math.max(0, Math.min(1, t));
+          const projX = p1x + t * (p2x - p1x);
+          const projY = p1y + t * (p2y - p1y);
+          if (Math.hypot(relX - projX, relY - projY) <= 8) {
+            if (onSelectRoad) onSelectRoad(road);
+            const midRow = Math.round(r1 + t * (r2 - r1));
+            const midCol = Math.round(c1 + t * (c2 - c1));
+            const info = getCellInfo(midRow, midCol);
+            if (onCellClick) onCellClick(info);
+            return;
+          }
+        }
+      }
+
+      // 3. Fallback: Cell click
       const col = Math.floor(relX / cellSize);
       const row = Math.floor(relY / cellSize);
       if (row >= 0 && row < ny && col >= 0 && col < nx) {
+        if (onSelectRoad) onSelectRoad(null);
+        if (onSelectFacility) onSelectFacility(null);
         const info = getCellInfo(row, col);
-        onCellClick(info);
+        if (onCellClick) onCellClick(info);
       }
     }
   };

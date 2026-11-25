@@ -14,7 +14,10 @@ import {
   Save,
   Database,
   CheckCircle2,
-  Info
+  Info,
+  X,
+  Hospital,
+  Navigation
 } from 'lucide-react';
 import { invokeSafe as invoke } from '../../../services/forgeBridge';
 import {
@@ -131,15 +134,22 @@ export const FloodSimulationView: React.FC = () => {
     roads: true,
     facilities: true,
     drainage: true,
+    legend: true,
   });
 
   const toggleLayer = (layer: keyof CanvasLayerVisibility) => {
     setActiveLayers((prev: CanvasLayerVisibility) => ({ ...prev, [layer]: !prev[layer] }));
   };
 
-  // 5. Interactive Inspection & Assumptions Panel State
+  // 4b. View Mode & Comparative Delta State
+  const [viewMode, setViewMode] = useState<'standard' | 'delta'>('standard');
+  const [baselineSnapshotDepth, setBaselineSnapshotDepth] = useState<Float64Array | null>(null);
+
+  // 5. Interactive Inspection, Selection & Assumptions Panel State
   const [hoveredCell, setHoveredCell] = useState<CellHoverInfo | null>(null);
   const [selectedCell, setSelectedCell] = useState<CellHoverInfo | null>(null);
+  const [selectedRoadId, setSelectedRoadId] = useState<string | null>(null);
+  const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
   const [showAssumptions, setShowAssumptions] = useState<boolean>(false);
 
   // 6. Simulation Step Execution Function
@@ -164,6 +174,8 @@ export const FloodSimulationView: React.FC = () => {
     const freshState = createHydraulicState(initialConfig);
     setSimState(freshState);
     setSelectedCell(null);
+    setSelectedRoadId(null);
+    setSelectedFacilityId(null);
   }, [initialConfig]);
 
   // 8. Load Golden Journey Preset (Fixed Parameters: NOAA 50-yr storm with Brookline Culvert 80% debris blockage)
@@ -181,7 +193,11 @@ export const FloodSimulationView: React.FC = () => {
     }
     const freshState = createHydraulicState(goldenConfig);
     setSimState(freshState);
+    // Snapshot the crisis baseline depth for delta comparisons
+    setBaselineSnapshotDepth(new Float64Array(freshState.waterDepth));
     setSelectedCell(null);
+    setSelectedRoadId(null);
+    setSelectedFacilityId(null);
   }, [dataset]);
 
   // 9. Animation & Simulation Ticking Loop
@@ -382,10 +398,40 @@ export const FloodSimulationView: React.FC = () => {
             <div className="flex items-center gap-2 text-storm-300">
               <Compass className="w-3.5 h-3.5 text-safety-orange" />
               <span className="font-bold text-storm-100 text-[11px] tracking-wide">
-                TOPOGRAPHIC ELEVATION & HYDRAULIC GRID
+                TACTICAL GEOSPATIAL SIMULATION CANVAS
               </span>
               <span className="text-onyx-700">|</span>
-              <span className="text-[10px] text-storm-400">4,096 CELLS</span>
+              <span className="text-[10px] text-storm-400">4,096 CELLS (25m)</span>
+
+              {/* View Mode Switcher: Depth vs Delta */}
+              <div className="flex items-center gap-1 bg-onyx-900 rounded border border-onyx-800 p-0.5 ml-2">
+                <button
+                  onClick={() => setViewMode('standard')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    viewMode === 'standard'
+                      ? 'bg-safety-orange text-white'
+                      : 'text-storm-400 hover:text-storm-200'
+                  }`}
+                >
+                  DEPTH BANDS
+                </button>
+                <button
+                  onClick={() => {
+                    if (!baselineSnapshotDepth) {
+                      setBaselineSnapshotDepth(new Float64Array(simState.waterDepth));
+                    }
+                    setViewMode(viewMode === 'delta' ? 'standard' : 'delta');
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    viewMode === 'delta'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-storm-400 hover:text-storm-200'
+                  }`}
+                  title="Toggle Avoided Floodwater Delta Map vs Reference Baseline"
+                >
+                  DELTA LAYER
+                </button>
+              </div>
             </div>
 
             {/* Layer Toggles */}
@@ -449,7 +495,7 @@ export const FloodSimulationView: React.FC = () => {
                 onClick={() => toggleLayer('roads')}
                 className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
                   activeLayers.roads
-                    ? 'bg-onyx-800 text-storm-100 border border-onyx-700'
+                    ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold'
                     : 'text-storm-500 hover:text-storm-300'
                 }`}
                 title="Toggle Emergency Road Corridors"
@@ -460,7 +506,7 @@ export const FloodSimulationView: React.FC = () => {
                 onClick={() => toggleLayer('facilities')}
                 className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
                   activeLayers.facilities
-                    ? 'bg-onyx-800 text-storm-100 border border-onyx-700'
+                    ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold'
                     : 'text-storm-500 hover:text-storm-300'
                 }`}
                 title="Toggle Medical Facilities"
@@ -478,6 +524,17 @@ export const FloodSimulationView: React.FC = () => {
               >
                 DRAINAGE
               </button>
+              <button
+                onClick={() => toggleLayer('legend')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  activeLayers.legend !== false
+                    ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold'
+                    : 'text-storm-500 hover:text-storm-300'
+                }`}
+                title="Toggle On-Canvas Tactical Legend"
+              >
+                LEGEND
+              </button>
             </div>
           </div>
 
@@ -486,10 +543,26 @@ export const FloodSimulationView: React.FC = () => {
             <GeographicSimulationCanvas
               dataset={dataset}
               waterDepth={simState.waterDepth}
+              baselineWaterDepth={baselineSnapshotDepth}
+              viewMode={viewMode}
               activeLayers={activeLayers}
               selectedCell={selectedCell ? { row: selectedCell.row, col: selectedCell.col } : null}
+              selectedRoadId={selectedRoadId}
+              selectedFacilityId={selectedFacilityId}
               onCellHover={setHoveredCell}
-              onCellClick={setSelectedCell}
+              onCellClick={(info) => {
+                setSelectedCell(info);
+                if (info.facility) setSelectedFacilityId(info.facility.facilityId);
+                if (info.roadCorridor) setSelectedRoadId(info.roadCorridor.road.roadId);
+              }}
+              onSelectRoad={(road) => {
+                setSelectedRoadId(road ? road.roadId : null);
+                if (road) setSelectedFacilityId(null);
+              }}
+              onSelectFacility={(fac) => {
+                setSelectedFacilityId(fac ? fac.facilityId : null);
+                if (fac) setSelectedRoadId(null);
+              }}
               className="w-full h-full"
             />
           </div>
@@ -612,23 +685,295 @@ export const FloodSimulationView: React.FC = () => {
         </div>
 
         {/* Tactical Telemetry & Cell Inspector */}
-        <div className="w-full xl:w-84 xl:flex-shrink-0 space-y-4">
-          {/* Tactical Cell Inspector Panel */}
+        <div className="w-full xl:w-96 xl:flex-shrink-0 space-y-4">
+          {/* Tactical Target Inspector Panel */}
           <div className="bg-onyx-900 rounded border border-onyx-800 p-4 shadow-tactical space-y-3 font-mono text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-onyx-800 text-storm-400">
               <div className="flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-safety-orange" />
-                <span className="font-bold text-storm-200 uppercase tracking-wide">CELL INSPECTOR</span>
+                <span className="font-bold text-storm-200 uppercase tracking-wide">TARGET INSPECTOR</span>
               </div>
-              <span className="text-[10px] text-storm-500">
-                {selectedCell ? 'LOCKED TARGET' : hoveredCell ? 'ACTIVE RETICLE' : 'HOVER TO PROBE'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-storm-500">
+                  {selectedCell ? 'LOCKED TARGET' : hoveredCell ? 'ACTIVE RETICLE' : 'HOVER TO PROBE'}
+                </span>
+                {(selectedCell || selectedRoadId || selectedFacilityId) && (
+                  <button
+                    onClick={() => {
+                      setSelectedCell(null);
+                      setSelectedRoadId(null);
+                      setSelectedFacilityId(null);
+                    }}
+                    className="p-1 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-300 hover:text-white transition-colors"
+                    title="Clear selected target"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {activeInspection ? (
-              <div className="space-y-2.5">
-                {/* Cell Identification & Coordinates */}
-                <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800 space-y-1">
+              <div className="space-y-3">
+                {/* 1. ENRICHED HOSPITAL EXPOSURE CARD */}
+                {activeInspection.hospitalExposure && (
+                  <div className="bg-onyx-950 border border-blue-900/60 rounded p-3 space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-onyx-800 pb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Hospital className="w-4 h-4 text-blue-400" />
+                        <span className="font-bold text-storm-100 text-xs">
+                          {activeInspection.hospitalExposure.facility.name}
+                        </span>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 text-[9px] font-bold">
+                        HOSPITAL CAMPUS
+                      </span>
+                    </div>
+
+                    {/* Campus Building Ground Floor Status */}
+                    <div className="bg-onyx-900/80 p-2 rounded border border-onyx-800 space-y-1">
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-storm-400">CAMPUS GROUND FLOOR:</span>
+                        {activeInspection.hospitalExposure.isBuildingDry ? (
+                          <span className="text-emerald-400 font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>DRY &amp; SECURE (0.0 cm)</span>
+                          </span>
+                        ) : (
+                          <span className="text-hazard-red font-bold">
+                            DIRECT PONDING ({(activeInspection.hospitalExposure.buildingStandingWaterDepthM * 100).toFixed(1)} cm)
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex justify-between text-[10px] text-storm-400">
+                        <span>CAMPUS ELEVATION:</span>
+                        <span className="text-storm-200">
+                          {activeInspection.hospitalExposure.campusGroundElevationM.toFixed(2)} m NAVD88
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-storm-400">
+                        <span>PERIMETER PEAK PONDING:</span>
+                        <span className="text-storm-200">
+                          {(activeInspection.hospitalExposure.perimeterMaxDepthM * 100).toFixed(1)} cm
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Access Routes Status Table */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-storm-400 uppercase font-bold block">
+                        INGRESS / EGRESS CORRIDORS ({activeInspection.hospitalExposure.accessRoutes.length})
+                      </span>
+                      <div className="divide-y divide-onyx-850 rounded bg-onyx-900 border border-onyx-800 text-[10px]">
+                        {activeInspection.hospitalExposure.accessRoutes.map((route) => (
+                          <div key={route.roadName} className="p-1.5 flex items-center justify-between">
+                            <span className="text-storm-200 font-semibold">{route.roadName}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-storm-400">{(route.maxDepthM * 100).toFixed(1)} cm</span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                  route.status === 'PASSABLE'
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                    : route.status === 'CAUTION'
+                                    ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                    : 'bg-red-950 text-red-300 border border-red-800'
+                                }`}
+                              >
+                                {route.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Overall Hospital Accessibility Verdict */}
+                    <div
+                      className={`p-2 rounded border text-[10px] leading-relaxed ${
+                        activeInspection.hospitalExposure.overallStatus === 'ACCESS_COMPROMISED_ISOLATED'
+                          ? 'bg-amber-950/40 border-amber-800 text-amber-300'
+                          : activeInspection.hospitalExposure.overallStatus === 'CAUTION_ACCESS_RESTRICTED'
+                          ? 'bg-blue-950/40 border-blue-800 text-blue-200'
+                          : 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center gap-1.5 mb-0.5">
+                        <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span>
+                          {activeInspection.hospitalExposure.overallStatus === 'ACCESS_COMPROMISED_ISOLATED'
+                            ? 'EMERGENCY INGRESS COMPROMISED'
+                            : activeInspection.hospitalExposure.overallStatus === 'CAUTION_ACCESS_RESTRICTED'
+                            ? 'PERIMETER PONDING CAUTION'
+                            : 'FULLY ACCESSIBLE TO TRANSIT'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] font-sans text-storm-300">
+                        {activeInspection.hospitalExposure.summaryText}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. ENRICHED EMERGENCY ROAD CORRIDOR CARD */}
+                {activeInspection.roadCorridor && !activeInspection.hospitalExposure && (
+                  <div className="bg-onyx-950 border border-onyx-800 rounded p-3 space-y-2.5">
+                    <div className="flex items-center justify-between border-b border-onyx-800 pb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Navigation className="w-3.5 h-3.5 text-safety-orange" />
+                        <span className="font-bold text-storm-100 text-xs">
+                          {activeInspection.roadCorridor.road.name}
+                        </span>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-onyx-850 text-storm-300 border border-onyx-700 text-[9px] uppercase font-bold">
+                        {activeInspection.roadCorridor.road.highwayType}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div className="bg-onyx-900 p-2 rounded border border-onyx-800">
+                        <span className="text-storm-500 block">CORRIDOR LENGTH</span>
+                        <span className="text-storm-100 text-xs font-bold">
+                          {activeInspection.roadCorridor.totalCellsCount * 25} m
+                        </span>
+                        <span className="text-storm-500 text-[9px] block">
+                          {activeInspection.roadCorridor.totalCellsCount} cells @ 25m
+                        </span>
+                      </div>
+                      <div className="bg-onyx-900 p-2 rounded border border-onyx-800">
+                        <span className="text-storm-500 block">MAX PONDING DEPTH</span>
+                        <span
+                          className={`text-xs font-bold ${
+                            activeInspection.roadCorridor.maxDepthM >= 0.30
+                              ? 'text-hazard-red'
+                              : activeInspection.roadCorridor.maxDepthM >= 0.15
+                              ? 'text-amber-400'
+                              : 'text-emerald-400'
+                          }`}
+                        >
+                          {(activeInspection.roadCorridor.maxDepthM * 100).toFixed(1)} cm
+                        </span>
+                        <span className="text-storm-500 text-[9px] block">
+                          Avg: {(activeInspection.roadCorridor.averageDepthM * 100).toFixed(1)} cm
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Segment Discretization Breakdown */}
+                    <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1 text-[10px]">
+                      <span className="text-storm-400 uppercase font-bold block">
+                        SEGMENT PASSABILITY BREAKDOWN
+                      </span>
+                      <div className="flex justify-between">
+                        <span className="text-emerald-400">Passable (&lt;15cm):</span>
+                        <span className="text-storm-200 font-bold">
+                          {activeInspection.roadCorridor.passableCellsCount} / {activeInspection.roadCorridor.totalCellsCount}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-amber-400">Caution (15-30cm):</span>
+                        <span className="text-storm-200 font-bold">
+                          {activeInspection.roadCorridor.cautionCellsCount} / {activeInspection.roadCorridor.totalCellsCount}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-red-400">Impassable (≥30cm):</span>
+                        <span className="text-storm-200 font-bold">
+                          {activeInspection.roadCorridor.impassableCellsCount} / {activeInspection.roadCorridor.totalCellsCount}
+                        </span>
+                      </div>
+                    </div>
+
+                    {activeInspection.roadCorridor.connectedHospitals.length > 0 && (
+                      <div className="bg-blue-950/30 p-2 rounded border border-blue-900/40 text-[10px] space-y-0.5">
+                        <span className="text-blue-300 font-bold block">CONNECTED MEDICAL FACILITIES:</span>
+                        <span className="text-storm-300 font-sans">
+                          {activeInspection.roadCorridor.connectedHospitals.join(', ')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. DRAINAGE INLET & CULVERT CARD */}
+                {activeInspection.drainageInlet && (
+                  <div className="bg-onyx-950 border border-cyan-900/60 rounded p-3 space-y-2">
+                    <div className="flex items-center justify-between border-b border-onyx-800 pb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Droplets className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="font-bold text-storm-100 text-xs">
+                          {activeInspection.drainageInlet.name}
+                        </span>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[9px] font-bold">
+                        POINT SINK
+                      </span>
+                    </div>
+
+                    <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1 text-[10px]">
+                      <div className="flex justify-between">
+                        <span className="text-storm-400">INLET ID:</span>
+                        <span className="text-storm-200 font-bold">{activeInspection.drainageInlet.inletId}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-storm-400">ASSUMED DESIGN CAPACITY:</span>
+                        <span className="text-cyan-300 font-bold">
+                          {activeInspection.drainageInlet.designCapacityM3PerSec} m³/s
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-storm-400">DEFAULT BLOCKAGE:</span>
+                        <span className="text-storm-200">
+                          {Math.round(activeInspection.drainageInlet.defaultBlockageRatio * 100)}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Engineering Provenance & Limitations Disclosure */}
+                    <div className="bg-onyx-900/60 p-2 rounded border border-onyx-800/80 text-[9px] text-storm-400 space-y-1 font-sans">
+                      <div className="font-bold text-amber-400 font-mono text-[9.5px]">
+                        ENGINEERING PROVENANCE &amp; SCREENING DISCLOSURE
+                      </div>
+                      <p>
+                        USACE Phase 1 replaced twin 72&quot; pipes with a 10&apos; × 24&apos; concrete box culvert.
+                        In this 25m planning model, it is abstracted as an exploratory lumped sink (12.5 m³/s nominal capacity).
+                        Detailed invert survey elevations and dynamic pipe backwater routing require certified 1D/2D engineering models.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. INTERVENTION DELTA DIFFERENTIAL CALLOUT */}
+                {activeInspection.deltaWaterDepthM !== undefined && viewMode === 'delta' && (
+                  <div
+                    className={`p-2.5 rounded border text-[11px] font-mono flex items-center justify-between ${
+                      activeInspection.deltaWaterDepthM > 0
+                        ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
+                        : activeInspection.deltaWaterDepthM < 0
+                        ? 'bg-amber-950/40 border-amber-800 text-amber-300'
+                        : 'bg-onyx-950 border-onyx-800 text-storm-400'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-bold block">
+                        {activeInspection.deltaWaterDepthM > 0
+                          ? 'AVOIDED FLOODWATER (PLAN WIN)'
+                          : activeInspection.deltaWaterDepthM < 0
+                          ? 'DEFLECTED PONDING (BARRIER)'
+                          : 'NEUTRAL STORAGE'}
+                      </span>
+                      <span className="text-[10px] text-storm-400">Vs. unmitigated crisis baseline</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-bold">
+                        {activeInspection.deltaWaterDepthM > 0 ? '-' : '+'}
+                        {Math.abs(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. BASELINE CELL COORDINATES & HYDRAULIC READOUT */}
+                <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800 space-y-1.5">
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-storm-400">GRID CELL:</span>
                     <span className="text-storm-100 font-bold">
@@ -647,72 +992,45 @@ export const FloodSimulationView: React.FC = () => {
                       {activeInspection.lat.toFixed(5)}°N, {Math.abs(activeInspection.lon).toFixed(5)}°W
                     </span>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-onyx-900">
+                    <div className="bg-onyx-900 p-2 rounded border border-onyx-850">
+                      <span className="text-[9px] text-storm-500 block">TERRAIN ELEVATION</span>
+                      <span className="text-storm-100 text-xs font-bold">
+                        {activeInspection.elevationM.toFixed(2)} m
+                      </span>
+                      <span className="text-[8.5px] text-storm-500 block">NAVD88 Datum</span>
+                    </div>
+                    <div className="bg-onyx-900 p-2 rounded border border-onyx-850">
+                      <span className="text-[9px] text-cyan-400 block">LOCAL WATER DEPTH</span>
+                      <span
+                        className={`text-xs font-bold ${
+                          activeInspection.waterDepthM >= 0.30
+                            ? 'text-hazard-red'
+                            : activeInspection.waterDepthM >= 0.15
+                            ? 'text-amber-400'
+                            : activeInspection.waterDepthM >= 0.05
+                            ? 'text-cyan-300'
+                            : 'text-storm-300'
+                        }`}
+                      >
+                        {(activeInspection.waterDepthM * 100).toFixed(1)} cm
+                      </span>
+                      <span className="text-[8.5px] text-storm-500 block">
+                        Surface: {activeInspection.waterSurfaceM.toFixed(2)} m
+                      </span>
+                    </div>
+                  </div>
                 </div>
-
-                {/* Elevation & Hydraulic Water Depth */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                    <span className="text-[10px] text-storm-500 block">TERRAIN ELEVATION</span>
-                    <span className="text-storm-100 text-sm font-bold">{activeInspection.elevationM.toFixed(2)} m</span>
-                    <span className="text-[9px] text-storm-500 block">NAVD88 Datum</span>
-                  </div>
-                  <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                    <span className="text-[10px] text-cyan-400 block">SIMULATED WATER DEPTH</span>
-                    <span className="text-cyan-300 text-sm font-bold">
-                      {(activeInspection.waterDepthM * 100).toFixed(1)} cm
-                    </span>
-                    <span className="text-[9px] text-storm-500 block">
-                      Surface: {activeInspection.waterSurfaceM.toFixed(2)} m
-                    </span>
-                  </div>
-                </div>
-
-                {/* Feature Presence (Facility, Road, Drainage) */}
-                {activeInspection.facility && (
-                  <div className="bg-onyx-950 border border-onyx-800 p-2.5 rounded text-[11px] text-storm-200">
-                    <div className="font-bold flex items-center justify-between text-storm-100">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-hazard-red" />
-                        <span>{activeInspection.facility.name}</span>
-                      </div>
-                      <span className="text-[9px] text-storm-400 uppercase">25m Cell Avg</span>
-                    </div>
-                    <div className="text-[10px] text-storm-400 mt-0.5">
-                      {activeInspection.facility.category} (OSM {activeInspection.facility.osmId}) • Planning screening only
-                    </div>
-                  </div>
-                )}
-
-                {activeInspection.drainageInlet && (
-                  <div className="bg-onyx-950 border border-onyx-800 p-2.5 rounded text-[11px] text-storm-200">
-                    <div className="font-bold flex items-center justify-between text-storm-100">
-                      <div className="flex items-center gap-1.5">
-                        <Droplets className="w-3.5 h-3.5 text-storm-400" />
-                        <span>{activeInspection.drainageInlet.name}</span>
-                      </div>
-                      <span className="text-[9px] text-storm-400 uppercase">Point Sink</span>
-                    </div>
-                    <div className="text-[10px] text-storm-400 mt-0.5">
-                      Assumed Capacity: {activeInspection.drainageInlet.designCapacityM3PerSec} m³/s (Adjustable assumption)
-                    </div>
-                  </div>
-                )}
-
-                {activeInspection.roadName && (
-                  <div className="bg-onyx-950 p-2 rounded border border-onyx-800 text-[10px] flex justify-between">
-                    <span className="text-storm-400">CORRIDOR (25m Avg):</span>
-                    <span className="text-storm-200 font-bold">{activeInspection.roadName}</span>
-                  </div>
-                )}
 
                 {/* Passability Status Banner */}
                 <div
                   className={`p-2 rounded border text-[11px] font-bold flex items-center gap-2 ${
                     activeInspection.passabilityStatus === 'CRITICAL_IMPASSABLE'
-                      ? 'bg-onyx-950 border-hazard-border text-hazard-red'
+                      ? 'bg-red-950/40 border-red-800 text-red-400'
                       : activeInspection.passabilityStatus === 'CAUTION_MINOR_PONDING'
-                      ? 'bg-onyx-950 border-onyx-700 text-storm-200'
-                      : 'bg-onyx-950 border-onyx-800 text-storm-300'
+                      ? 'bg-amber-950/40 border-amber-800 text-amber-300'
+                      : 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
                   }`}
                 >
                   <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" />
@@ -721,7 +1039,7 @@ export const FloodSimulationView: React.FC = () => {
                     {activeInspection.passabilityStatus === 'CRITICAL_IMPASSABLE'
                       ? 'IMPASSABLE ROADWAY (>30cm)'
                       : activeInspection.passabilityStatus === 'CAUTION_MINOR_PONDING'
-                      ? 'MINOR WATER ACCUMULATION (10-30cm)'
+                      ? 'AMBULANCE CAUTION (10-30cm)'
                       : 'CLEAR & FULLY PASSABLE (<10cm)'}
                   </span>
                 </div>
@@ -729,8 +1047,8 @@ export const FloodSimulationView: React.FC = () => {
             ) : (
               <div className="p-6 bg-onyx-950 rounded border border-onyx-800/60 text-center text-storm-500 space-y-1">
                 <Compass className="w-6 h-6 mx-auto text-storm-600 mb-1" />
-                <p>Move cursor over the 64×64 simulation grid to inspect elevation and depth values.</p>
-                <p className="text-[10px]">Click any cell to lock reticle.</p>
+                <p>Move cursor over the simulation canvas to inspect terrain and flood depths.</p>
+                <p className="text-[10px]">Click any hospital, road, or culvert to lock telemetry.</p>
               </div>
             )}
           </div>

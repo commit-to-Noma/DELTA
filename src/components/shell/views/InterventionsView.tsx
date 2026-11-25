@@ -13,7 +13,9 @@ import {
   AlertTriangle,
   X,
   Lock,
-  FileText
+  FileText,
+  Compass,
+  MapPin
 } from 'lucide-react';
 import { loadBostonCatchment } from '../../../data/catchmentLoader';
 import { 
@@ -24,6 +26,11 @@ import {
   HospitalImprovement
 } from '../../../simulation/interventionEngine';
 import { invokeSafe } from '../../../services/forgeBridge';
+import {
+  GeographicSimulationCanvas,
+  CellHoverInfo,
+  CanvasLayerVisibility,
+} from '../../simulation/GeographicSimulationCanvas';
 
 interface InterventionsViewProps {
   onNavigateToDecisions?: () => void;
@@ -41,6 +48,27 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvedRecord, setApprovedRecord] = useState<any | null>(null);
+
+  // Centerpiece Canvas State for Intervention Visual Evaluation
+  const [canvasLayers, setCanvasLayers] = useState<CanvasLayerVisibility>({
+    satellite: true,
+    terrain: false,
+    contours: false,
+    water: true,
+    vectors: false,
+    roads: true,
+    facilities: true,
+    drainage: true,
+    legend: true,
+  });
+  const [mapViewMode, setMapViewMode] = useState<'standard' | 'delta'>('delta');
+  const [inspectedCell, setInspectedCell] = useState<CellHoverInfo | null>(null);
+  const [selectedRoadId, setSelectedRoadId] = useState<string | null>(null);
+  const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
+
+  const toggleCanvasLayer = (layer: keyof CanvasLayerVisibility) => {
+    setCanvasLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
+  };
 
   // Set default engineering rationale when plan changes
   useEffect(() => {
@@ -271,6 +299,176 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
           </div>
         </div>
       ) : null}
+
+      {/* Centerpiece Geospatial Canvas for Interventions */}
+      {evaluationResult && selectedPlanMetrics && selectedDiff && (
+        <div className="bg-onyx-900 rounded-lg border border-onyx-800 overflow-hidden shadow-tactical flex flex-col font-mono text-xs">
+          {/* Canvas Top Bar */}
+          <div className="bg-onyx-950 px-4 py-2 border-b border-onyx-800 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-storm-300">
+              <Compass className="w-4 h-4 text-safety-orange" />
+              <span className="font-bold text-storm-100 text-xs tracking-wide">
+                SPATIAL INTERVENTION OUTCOME // {selectedPlanDef.name.toUpperCase()}
+              </span>
+              <span className="text-onyx-700 hidden sm:inline">|</span>
+              <span className="text-[10px] text-storm-400 hidden sm:inline">1,600m × 1,600m DOMAIN</span>
+
+              {/* View Mode: Delta vs Absolute */}
+              <div className="flex items-center gap-1 bg-onyx-900 rounded border border-onyx-800 p-0.5 ml-2">
+                <button
+                  onClick={() => setMapViewMode('delta')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    mapViewMode === 'delta'
+                      ? 'bg-emerald-600 text-white shadow-tactical'
+                      : 'text-storm-400 hover:text-storm-200'
+                  }`}
+                  title="Shows avoided flood volume (green) vs unmitigated baseline"
+                >
+                  AVOIDED WATER (DELTA)
+                </button>
+                <button
+                  onClick={() => setMapViewMode('standard')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    mapViewMode === 'standard'
+                      ? 'bg-safety-orange text-white shadow-tactical'
+                      : 'text-storm-400 hover:text-storm-200'
+                  }`}
+                  title="Shows absolute simulated flood depth bands"
+                >
+                  ACTUAL DEPTH BANDS
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Layer Toggles */}
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                onClick={() => toggleCanvasLayer('satellite')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  canvasLayers.satellite ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
+                }`}
+              >
+                SATELLITE
+              </button>
+              <button
+                onClick={() => toggleCanvasLayer('water')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  canvasLayers.water ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
+                }`}
+              >
+                WATER
+              </button>
+              <button
+                onClick={() => toggleCanvasLayer('roads')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  canvasLayers.roads ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
+                }`}
+              >
+                ROADS
+              </button>
+              <button
+                onClick={() => toggleCanvasLayer('facilities')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  canvasLayers.facilities ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
+                }`}
+              >
+                HOSPITALS
+              </button>
+              <button
+                onClick={() => toggleCanvasLayer('drainage')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  canvasLayers.drainage ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
+                }`}
+              >
+                CULVERTS
+              </button>
+              <button
+                onClick={() => toggleCanvasLayer('legend')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  canvasLayers.legend !== false ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
+                }`}
+              >
+                LEGEND
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Geographic Canvas Frame */}
+          <div className="relative bg-onyx-950 h-[480px] overflow-hidden">
+            <GeographicSimulationCanvas
+              dataset={dataset}
+              waterDepth={selectedPlanMetrics.waterDepth}
+              baselineWaterDepth={evaluationResult.baseline.waterDepth}
+              viewMode={mapViewMode}
+              activeLayers={canvasLayers}
+              selectedRoadId={selectedRoadId}
+              selectedFacilityId={selectedFacilityId}
+              onCellHover={setInspectedCell}
+              onCellClick={(info) => {
+                setInspectedCell(info);
+                if (info.facility) setSelectedFacilityId(info.facility.facilityId);
+                if (info.roadCorridor) setSelectedRoadId(info.roadCorridor.road.roadId);
+              }}
+              onSelectRoad={(road) => {
+                setSelectedRoadId(road ? road.roadId : null);
+                if (road) setSelectedFacilityId(null);
+              }}
+              onSelectFacility={(fac) => {
+                setSelectedFacilityId(fac ? fac.facilityId : null);
+                if (fac) setSelectedRoadId(null);
+              }}
+              className="w-full h-full"
+            />
+          </div>
+
+          {/* Bottom Telemetry Bar */}
+          <div className="bg-onyx-950 px-4 py-2.5 border-t border-onyx-800 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+            <div className="flex flex-wrap items-center gap-4 text-storm-300">
+              <div>
+                <span className="text-storm-500">Selected Plan:</span>{' '}
+                <strong className="text-storm-100">{selectedPlanDef.name}</strong>
+              </div>
+              <div className="h-3 w-[1px] bg-onyx-800 hidden sm:block" />
+              <div>
+                <span className="text-storm-500">Surface Water Avoided:</span>{' '}
+                <strong className={selectedDiff.avoidedSurfaceVolumeM3 > 0 ? 'text-emerald-400' : 'text-storm-300'}>
+                  {selectedDiff.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}
+                  {selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³
+                </strong>
+              </div>
+              <div className="h-3 w-[1px] bg-onyx-800 hidden sm:block" />
+              <div>
+                <span className="text-storm-500">Road Corridors Protected:</span>{' '}
+                <strong className="text-emerald-400">{selectedDiff.protectedRoadCount} Segments</strong>
+              </div>
+            </div>
+
+            {inspectedCell && (
+              <div className="flex items-center gap-2 text-storm-300 bg-onyx-900 px-2 py-1 rounded border border-onyx-800 text-[10px]">
+                <MapPin className="w-3 h-3 text-safety-orange" />
+                <span>
+                  Reticle: [{inspectedCell.row}, {inspectedCell.col}] • Depth: {(inspectedCell.waterDepthM * 100).toFixed(1)} cm
+                  {inspectedCell.deltaWaterDepthM !== undefined && (
+                    <span className="text-emerald-400 ml-1.5 font-bold">
+                      (Δ: {inspectedCell.deltaWaterDepthM > 0 ? '-' : '+'}{Math.abs(inspectedCell.deltaWaterDepthM * 100).toFixed(1)} cm)
+                    </span>
+                  )}
+                </span>
+                <button
+                  onClick={() => {
+                    setInspectedCell(null);
+                    setSelectedRoadId(null);
+                    setSelectedFacilityId(null);
+                  }}
+                  className="text-storm-500 hover:text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Detailed Plan Review Panel */}
       {evaluationResult && selectedDiff && selectedPlanMetrics && (
