@@ -8,9 +8,19 @@ import {
   Waves, 
   FileText,
   Info,
-  ShieldCheck
+  ShieldCheck,
+  Lock,
+  CheckSquare,
+  Square,
+  Ticket
 } from 'lucide-react';
 import { invokeSafe, getContextSafe } from '../../services/forgeBridge';
+import { 
+  OperationalWorkOrder, 
+  prepareWorkOrderFromDecision, 
+  getStoredWorkOrders, 
+  saveStoredWorkOrder
+} from '../../simulation/workOrderEngine';
 
 interface IssuePanelProps {
   initialIssueKey?: string;
@@ -51,6 +61,7 @@ interface LinkedDecision {
 export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenFullApp }) => {
   const [issueKey, setIssueKey] = useState<string>(initialIssueKey || 'EMERG-101');
   const [linkedDecision, setLinkedDecision] = useState<LinkedDecision | null>(null);
+  const [linkedWorkOrder, setLinkedWorkOrder] = useState<OperationalWorkOrder | null>(null);
   const [availableDecisions, setAvailableDecisions] = useState<LinkedDecision[]>([]);
   const [selectedDecisionId, setSelectedDecisionId] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -80,7 +91,7 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
     resolveContext();
   }, [initialIssueKey]);
 
-  // 2. Fetch linked decision for this issue
+  // 2. Fetch linked decision and operational work order for this issue
   const fetchLinkedDecision = async (targetKey: string) => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -88,14 +99,37 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
       const res: any = await invokeSafe('getDecisionForIssue', { issueKey: targetKey });
       if (res && res.success && res.data) {
         setLinkedDecision(res.data);
+
+        // Fetch associated work order
+        try {
+          const woRes: any = await invokeSafe('getWorkOrderForIssue', { issueKey: targetKey });
+          if (woRes && woRes.success && woRes.data) {
+            setLinkedWorkOrder(woRes.data);
+          } else {
+            // Check local store
+            const stored = getStoredWorkOrders();
+            const matched = stored.find(w => w.jiraIntegration?.linkedIssueKey === targetKey || w.decisionId === res.data.decisionId);
+            if (matched) {
+              setLinkedWorkOrder(matched);
+            } else {
+              const draft = prepareWorkOrderFromDecision(res.data, 'COMMANDER_STAGED');
+              setLinkedWorkOrder(draft);
+            }
+          }
+        } catch {
+          const draft = prepareWorkOrderFromDecision(res.data, 'COMMANDER_STAGED');
+          setLinkedWorkOrder(draft);
+        }
       } else {
         setLinkedDecision(null);
+        setLinkedWorkOrder(null);
         // If no decision linked, fetch available approved decisions for linking
         fetchAvailableDecisions();
       }
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to retrieve linked decision record.');
       setLinkedDecision(null);
+      setLinkedWorkOrder(null);
     } finally {
       setIsLoading(false);
     }
@@ -138,6 +172,15 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
 
       if (res && res.success) {
         setSuccessMessage(`Successfully linked decision ${selectedDecisionId} to issue ${issueKey}!`);
+        // Also stage and save the operational work order for this issue
+        const targetDec = availableDecisions.find(d => d.decisionId === selectedDecisionId);
+        if (targetDec) {
+          const wo = prepareWorkOrderFromDecision(targetDec, 'JIRA_LINKED');
+          wo.jiraIntegration.linkedIssueKey = issueKey;
+          wo.jiraIntegration.linkedAt = new Date().toISOString();
+          saveStoredWorkOrder(wo);
+          invokeSafe('saveWorkOrder', { workOrder: wo }).catch(() => {});
+        }
         await fetchLinkedDecision(issueKey);
       } else {
         setErrorMessage(res?.error?.message || 'Server rejected decision link authorization.');
@@ -209,6 +252,12 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
 
         if (linkRes && linkRes.success) {
           setSuccessMessage(`Successfully authorized and linked decision ${newDecisionId} to issue ${issueKey}!`);
+          // Also stage and save the operational work order for this issue
+          const wo = prepareWorkOrderFromDecision(res.data, 'JIRA_LINKED');
+          wo.jiraIntegration.linkedIssueKey = issueKey;
+          wo.jiraIntegration.linkedAt = new Date().toISOString();
+          saveStoredWorkOrder(wo);
+          invokeSafe('saveWorkOrder', { workOrder: wo }).catch(() => {});
           await fetchLinkedDecision(issueKey);
         } else {
           setErrorMessage(linkRes?.error?.message || 'Decision recorded in KVS but link authorization failed.');
@@ -385,6 +434,95 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
               </code>
             </div>
           </div>
+
+          {/* Staged Operational Work Order (Workstream 4) */}
+          {linkedWorkOrder && (
+            <div className="bg-onyx-900 rounded-lg p-3.5 border border-cyan-800/80 space-y-3">
+              <div className="flex items-center justify-between border-b border-onyx-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <Ticket className="w-4 h-4 text-cyan-400" />
+                  <span className="font-bold text-xs text-storm-100 uppercase tracking-wider">
+                    STAGED OPERATIONAL WORK ORDER: {linkedWorkOrder.workOrderId}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-red-950/80 border border-red-800 text-red-300 text-[9px] font-bold">
+                    {linkedWorkOrder.urgency.replace('_', ' ')}
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 text-[9px] font-bold">
+                    {linkedWorkOrder.stage.replace('_', ' ')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Target Site Coordinates */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                <div className="bg-onyx-950 p-2 rounded border border-onyx-800">
+                  <span className="text-storm-500 block uppercase">TARGET SITE & GRID CELL</span>
+                  <span className="text-storm-200 font-bold block truncate">{linkedWorkOrder.targetLocation.name}</span>
+                  <span className="text-cyan-400 font-mono block">Grid Cell: [{linkedWorkOrder.targetLocation.gridCell[0]}, {linkedWorkOrder.targetLocation.gridCell[1]}]</span>
+                </div>
+
+                <div className="bg-onyx-950 p-2 rounded border border-onyx-800">
+                  <span className="text-storm-500 block uppercase">GEODETIC / STATE PLANE</span>
+                  <span className="text-storm-200 font-mono block">
+                    {linkedWorkOrder.targetLocation.wgs84.lat.toFixed(5)}°N, {Math.abs(linkedWorkOrder.targetLocation.wgs84.lon).toFixed(5)}°W
+                  </span>
+                  <span className="text-purple-300 font-mono block">
+                    EPSG:26986: ({linkedWorkOrder.targetLocation.projected.x.toFixed(1)}, {linkedWorkOrder.targetLocation.projected.y.toFixed(1)})
+                  </span>
+                </div>
+              </div>
+
+              {/* Access Route & Equipment */}
+              <div className="bg-onyx-950 p-2 rounded border border-onyx-800 text-[10px] space-y-1">
+                <div>
+                  <span className="text-storm-500 font-bold uppercase">INGRESS ROUTE: </span>
+                  <span className="text-emerald-300 font-mono">{linkedWorkOrder.targetLocation.accessCorridor}</span>
+                </div>
+                <div>
+                  <span className="text-storm-500 font-bold uppercase">TACTICAL CREW: </span>
+                  <span className="text-storm-200">{linkedWorkOrder.crewRequirement}</span>
+                </div>
+                <div className="pt-1 flex flex-wrap gap-1">
+                  {linkedWorkOrder.tacticalEquipment.slice(0, 3).map((eq, i) => (
+                    <span key={i} className="px-1.5 py-0.5 bg-onyx-900 border border-onyx-700 rounded text-[9px] text-storm-300">
+                      {eq}
+                    </span>
+                  ))}
+                  {linkedWorkOrder.tacticalEquipment.length > 3 && (
+                    <span className="px-1.5 py-0.5 bg-onyx-900 border border-onyx-700 rounded text-[9px] text-storm-400">
+                      +{linkedWorkOrder.tacticalEquipment.length - 3} more units
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Protocol Checklist Preview */}
+              <div className="space-y-1 text-[10px]">
+                <span className="text-storm-400 font-bold uppercase block">
+                  TACTICAL TASKS ({linkedWorkOrder.operationalTasks.filter(t => t.isCompleted).length}/{linkedWorkOrder.operationalTasks.length} VERIFIED):
+                </span>
+                <div className="space-y-1">
+                  {linkedWorkOrder.operationalTasks.slice(0, 3).map((t) => (
+                    <div key={t.stepNumber} className="flex items-center gap-1.5 text-storm-300 bg-onyx-950 p-1.5 rounded border border-onyx-800">
+                      {t.isCompleted ? <CheckSquare className="w-3 h-3 text-emerald-400" /> : <Square className="w-3 h-3 text-storm-500" />}
+                      <span className="font-bold text-storm-400">Step {t.stepNumber}:</span>
+                      <span className="truncate">{t.title}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Live Dispatch Safety Boundary Callout */}
+              <div className="bg-onyx-950 p-2 rounded border border-amber-900/50 flex items-start gap-2 text-[10px] text-amber-300">
+                <Lock className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-amber-200">LIVE_DISPATCH_LOCKED:</strong> Autonomous live ticket dispatch is locked by server safety policy. Requires verbal Incident Commander radio order.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* State B: No Decision Linked Yet */

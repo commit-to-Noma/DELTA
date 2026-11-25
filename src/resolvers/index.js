@@ -6,6 +6,10 @@ import {
   linkDecisionToIssue,
   listDecisions,
   validateDecisionPayload,
+  saveWorkOrder,
+  getWorkOrder,
+  listWorkOrders,
+  getWorkOrderForIssue,
   getStorageClient,
   __resetInMemoryStore
 } from './decisionStorage.js';
@@ -45,6 +49,10 @@ export {
   linkDecisionToIssue,
   listDecisions,
   validateDecisionPayload,
+  saveWorkOrder,
+  getWorkOrder,
+  listWorkOrders,
+  getWorkOrderForIssue,
   getStorageClient,
   __resetInMemoryStore,
   createDispatchTicket,
@@ -324,6 +332,36 @@ resolver.define('linkDecisionToIssue', async (req) => {
       }
     };
   }
+});
+
+// Staged Operational Work Order Operations (Custom UI Bridge)
+resolver.define('saveWorkOrder', async (req) => {
+  try {
+    const payload = req?.payload || req;
+    return await saveWorkOrder(payload, null, req?.context);
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        code: err.code || 'SAVE_WORK_ORDER_FAILED',
+        message: err.message
+      }
+    };
+  }
+});
+
+resolver.define('getWorkOrder', async (req) => {
+  const workOrderId = req?.payload?.workOrderId || req?.payload || req?.workOrderId;
+  return await getWorkOrder(workOrderId);
+});
+
+resolver.define('listWorkOrders', async () => {
+  return await listWorkOrders();
+});
+
+resolver.define('getWorkOrderForIssue', async (req) => {
+  const issueKey = req?.payload?.issueKey || req?.payload || req?.issueKey;
+  return await getWorkOrderForIssue(issueKey);
 });
 
 // JSM Field Dispatch Ticket Creation (Custom UI Bridge)

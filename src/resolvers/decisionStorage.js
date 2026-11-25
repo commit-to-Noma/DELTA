@@ -483,6 +483,96 @@ export async function listDecisions(storageOverride = null) {
 }
 
 /**
+ * Saves a structured operational work order in Forge KVS.
+ */
+export async function saveWorkOrder(workOrder, storageOverride = null, authContext = null) {
+  if (!workOrder || !workOrder.workOrderId) {
+    const err = new Error('Invalid work order payload: workOrderId is required.');
+    err.code = 'INVALID_WORK_ORDER_PAYLOAD';
+    throw err;
+  }
+
+  const client = getStorageClient(storageOverride);
+  await client.set(`work-order:${workOrder.workOrderId}`, workOrder);
+
+  // Maintain chronological work orders index
+  const index = (await client.get('work-orders:index')) || [];
+  if (!index.includes(workOrder.workOrderId)) {
+    index.push(workOrder.workOrderId);
+    await client.set('work-orders:index', index);
+  }
+
+  // If associated with a Jira issue key, maintain pointer
+  if (workOrder.jiraIntegration?.linkedIssueKey) {
+    await client.set(`issue-work-order:${workOrder.jiraIntegration.linkedIssueKey}`, workOrder.workOrderId);
+  }
+
+  return {
+    success: true,
+    data: workOrder
+  };
+}
+
+/**
+ * Retrieves a structured operational work order by ID.
+ */
+export async function getWorkOrder(workOrderId, storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const record = await client.get(`work-order:${workOrderId}`);
+  if (!record) {
+    return {
+      success: false,
+      error: {
+        code: 'WORK_ORDER_NOT_FOUND',
+        message: `No operational work order found for ID '${workOrderId}'.`
+      }
+    };
+  }
+
+  return {
+    success: true,
+    data: record
+  };
+}
+
+/**
+ * Lists all registered operational work orders from Forge KVS.
+ */
+export async function listWorkOrders(storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const index = (await client.get('work-orders:index')) || [];
+
+  const records = [];
+  for (const id of index) {
+    const rec = await client.get(`work-order:${id}`);
+    if (rec) records.push(rec);
+  }
+
+  return {
+    success: true,
+    data: records,
+    count: records.length
+  };
+}
+
+/**
+ * Retrieves an operational work order linked to a specific Jira issue key.
+ */
+export async function getWorkOrderForIssue(issueKey, storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const workOrderId = await client.get(`issue-work-order:${issueKey}`);
+  if (!workOrderId) {
+    return {
+      success: true,
+      data: null,
+      message: `No operational work order linked to issue '${issueKey}'.`
+    };
+  }
+
+  return await getWorkOrder(workOrderId, client);
+}
+
+/**
  * Helper to clear test in-memory storage (used exclusively by test suites).
  */
 export function __resetInMemoryStore() {
