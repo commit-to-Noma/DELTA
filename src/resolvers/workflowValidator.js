@@ -27,8 +27,12 @@ export const GATE_ERROR_MESSAGES = {
  * @param {object} [storageOverride] - Optional mock storage client for testing
  * @returns {Promise<{ result: boolean, errorMessage?: string }>}
  */
-export async function validateTransition(event, storageOverride = null) {
-  const issueKey = event?.issue?.key;
+export async function validateTransition(event, storageOverride = null, context = null) {
+  const issueKey = event?.issue?.key || 
+                   event?.issueKey || 
+                   event?.context?.issue?.key || 
+                   context?.extension?.issue?.key ||
+                   context?.issue?.key;
 
   if (!issueKey) {
     return {
@@ -76,7 +80,7 @@ export async function validateTransition(event, storageOverride = null) {
  */
 export async function handler(event, context) {
   try {
-    return await validateTransition(event);
+    return await validateTransition(event, null, context);
   } catch (error) {
     return {
       result: false,
