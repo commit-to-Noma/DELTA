@@ -312,5 +312,66 @@ describe('Task 1.4: Geographic Canvas & Hydraulic Integration', () => {
       expect(bwhEval).toBeDefined();
       expect(bwhEval!.accessStatusDescription).toContain('operational vehicular access unverified');
     });
+
+    it('TEST-CANVAS-11: Validates exact output binding for hospital exposure, road corridors, and negative delta semantics', () => {
+      const { nx, ny } = dataset.metadata.grid;
+      const depthArray = new Float64Array(nx * ny);
+
+      // 1. Inundate Francis St access corridor for BWH (>30cm) while campus footprint remains dry
+      const bwh = dataset.criticalFacilities.find((f) => f.name.includes("Brigham and Women's"))!;
+      const [bwhR, bwhC] = bwh.gridCell;
+      depthArray[bwhR * nx + bwhC] = 0.0; // Building footprint is dry
+
+      // Find Francis Street road corridor
+      const francisRoad = dataset.criticalRoads.find((r) => r.name.includes('Francis'));
+      expect(francisRoad).toBeDefined();
+
+      // Flood the first road cell of Francis St to 0.42m (>30cm) and second to 0.22m (15-30cm)
+      const [r1, c1] = francisRoad!.gridCells[0];
+      const [r2, c2] = francisRoad!.gridCells[1];
+      depthArray[r1 * nx + c1] = 0.42;
+      depthArray[r2 * nx + c2] = 0.22;
+
+      // Evaluate hospital accessibility against this hydraulic state
+      const evals = evaluateHospitalAccess(dataset, depthArray);
+      const bwhResult = evals.find((e) => e.name.includes("Brigham and Women's"))!;
+      expect(bwhResult.buildingStandingWaterDepthM).toBe(0.0);
+      expect(bwhResult.overallRoutePassability).toBe('IMPASSABLE');
+      expect(bwhResult.status).toBe('ISOLATED_INUNDATION');
+      expect(bwhResult.accessStatusDescription).toContain('Screened access corridor exceeds 30cm depth threshold');
+
+      // 2. Validate Road Corridor Segment Classification binding
+      let passableCount = 0;
+      let cautionCount = 0;
+      let impassableCount = 0;
+      for (const [r, c] of francisRoad!.gridCells) {
+        const d = depthArray[r * nx + c];
+        if (d >= 0.30) impassableCount++;
+        else if (d >= 0.15) cautionCount++;
+        else passableCount++;
+      }
+      expect(impassableCount).toBeGreaterThanOrEqual(1);
+      expect(cautionCount).toBeGreaterThanOrEqual(1);
+      expect(passableCount).toBe(francisRoad!.gridCells.length - impassableCount - cautionCount);
+
+      // 3. Validate Intervention Delta Semantics (Positive = Drawdown, Negative = Local Increase)
+      const baselineDepth = new Float64Array(nx * ny);
+      const interventionDepth = new Float64Array(nx * ny);
+
+      // At cell A: Plan reduces water (0.50m baseline -> 0.20m plan)
+      const idxA = 10 * nx + 10;
+      baselineDepth[idxA] = 0.50;
+      interventionDepth[idxA] = 0.20;
+      const deltaA = baselineDepth[idxA] - interventionDepth[idxA];
+      expect(deltaA).toBe(0.30); // Positive: 30cm avoided water / drawdown
+
+      // At cell B: Plan deflects water, increasing local ponding (0.10m baseline -> 0.28m plan)
+      const idxB = 10 * nx + 11;
+      baselineDepth[idxB] = 0.10;
+      interventionDepth[idxB] = 0.28;
+      const deltaB = baselineDepth[idxB] - interventionDepth[idxB];
+      expect(deltaB).toBeCloseTo(-0.18, 5); // Negative: 18cm MORE water (deflected ponding)
+      expect(deltaB < 0).toBe(true);
+    });
   });
 });

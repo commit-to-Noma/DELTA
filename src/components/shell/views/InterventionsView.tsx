@@ -449,8 +449,22 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
                 <span>
                   Reticle: [{inspectedCell.row}, {inspectedCell.col}] • Depth: {(inspectedCell.waterDepthM * 100).toFixed(1)} cm
                   {inspectedCell.deltaWaterDepthM !== undefined && (
-                    <span className="text-emerald-400 ml-1.5 font-bold">
-                      (Δ: {inspectedCell.deltaWaterDepthM > 0 ? '-' : '+'}{Math.abs(inspectedCell.deltaWaterDepthM * 100).toFixed(1)} cm)
+                    <span
+                      className={`ml-1.5 font-bold ${
+                        inspectedCell.deltaWaterDepthM > 0
+                          ? 'text-emerald-400'
+                          : inspectedCell.deltaWaterDepthM < 0
+                          ? 'text-amber-400'
+                          : 'text-storm-400'
+                      }`}
+                    >
+                      (Δ:{' '}
+                      {inspectedCell.deltaWaterDepthM > 0
+                        ? `-${(inspectedCell.deltaWaterDepthM * 100).toFixed(1)}cm drawdown`
+                        : inspectedCell.deltaWaterDepthM < 0
+                        ? `+${(Math.abs(inspectedCell.deltaWaterDepthM) * 100).toFixed(1)}cm increase`
+                        : '0.0cm'}
+                      )
                     </span>
                   )}
                 </span>

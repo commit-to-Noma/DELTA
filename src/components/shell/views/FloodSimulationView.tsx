@@ -972,23 +972,26 @@ export const FloodSimulationView: React.FC = () => {
                     <div>
                       <span className="font-bold block">
                         {activeInspection.deltaWaterDepthM > 0
-                          ? 'AVOIDED FLOODWATER (DEPTH REDUCTION)'
+                          ? 'AVOIDED FLOODWATER (LOCAL REDUCTION)'
                           : activeInspection.deltaWaterDepthM < 0
-                          ? 'DEFLECTED PONDING (LOCAL INCREASE)'
-                          : 'NEUTRAL STORAGE'}
+                          ? 'LOCAL WATER INCREASE (DEFLECTED PONDING)'
+                          : 'NEUTRAL STORAGE (NO CHANGE)'}
                       </span>
                       <span className="text-[10px] text-storm-400">
                         {activeInspection.deltaWaterDepthM > 0
-                          ? `-${(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm vs. unmitigated crisis baseline`
+                          ? `Plan reduces local depth by ${(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm vs. baseline`
                           : activeInspection.deltaWaterDepthM < 0
-                          ? `+${Math.abs(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm vs. unmitigated crisis baseline`
+                          ? `Plan produces ${(Math.abs(activeInspection.deltaWaterDepthM) * 100).toFixed(1)} cm MORE local water vs. baseline`
                           : 'Identical depth vs. baseline'}
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="text-sm font-bold">
-                        {activeInspection.deltaWaterDepthM > 0 ? '-' : '+'}
+                      <span className="text-sm font-bold block">
+                        {activeInspection.deltaWaterDepthM > 0 ? '-' : activeInspection.deltaWaterDepthM < 0 ? '+' : ''}
                         {Math.abs(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm
+                      </span>
+                      <span className="text-[8.5px] text-storm-500 uppercase font-sans">
+                        {activeInspection.deltaWaterDepthM > 0 ? 'Net Drawdown' : activeInspection.deltaWaterDepthM < 0 ? 'Net Increase' : 'No Delta'}
                       </span>
                     </div>
                   </div>
