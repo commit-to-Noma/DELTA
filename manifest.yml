@@ -3,6 +3,8 @@ modules:
     - key: delta-decision-engine
       resource: main-ui
       title: DELTA Engine
+      resolver:
+        function: rovo-action-handler
   jira:workflowValidator:
     - key: delta-decision-record-validator
       name: DELTA Decision Record Approval Gate
@@ -66,3 +68,4 @@ app:
   id: ari:cloud:ecosystem::app/7c4b604a-2340-4df7-8c0a-8fd8e44b7a12
   runtime:
     name: nodejs22.x
+
