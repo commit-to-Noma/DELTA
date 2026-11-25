@@ -3,6 +3,11 @@ modules:
     - key: delta-decision-engine
       resource: main-ui
       title: DELTA Engine
+  jira:workflowValidator:
+    - key: delta-decision-record-validator
+      name: DELTA Decision Record Approval Gate
+      description: Blocks issue transitions to Dispatched or Resolved unless an approved DELTA Decision Record is linked in Forge KVS.
+      function: workflow-validator
   rovo:agent:
     - key: delta-incident-agent
       name: DELTA Hydraulic Advisor
@@ -44,6 +49,8 @@ modules:
   function:
     - key: rovo-action-handler
       handler: resolvers/index.handler
+    - key: workflow-validator
+      handler: resolvers/workflowValidator.handler
 
 resources:
   - key: main-ui
