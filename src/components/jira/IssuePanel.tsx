@@ -444,7 +444,7 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
                 <div className="grid grid-cols-2 gap-2 text-[10px] pt-1 border-t border-onyx-900">
                   <div><span className="text-storm-500">AVOIDED STORAGE:</span> <strong className="text-storm-200">+22 m³</strong></div>
                   <div><span className="text-storm-500">RESTORED CONVEYANCE:</span> <strong className="text-storm-200">12.5 m³/s</strong></div>
-                  <div className="col-span-2"><span className="text-storm-500">SCENARIO HASH:</span> <code className="text-purple-300 font-mono text-[9px]">sha256:f0a73115e28a69b7f0dcfbbfe52182597bf8862c482d302b9c50154f488c9a47</code></div>
+                  <div className="col-span-2"><span className="text-storm-500">SCENARIO HASH:</span> <code className="text-purple-300 font-mono text-[9px] break-all block pt-0.5">sha256:f0a73115e28a69b7f0dcfbbfe52182597bf8862c482d302b9c50154f488c9a47</code></div>
                 </div>
               </div>
 
