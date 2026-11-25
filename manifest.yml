@@ -18,6 +18,8 @@ modules:
       actions:
         - get-simulation-status
         - evaluate-interventions
+        - get-decision-record
+        - list-decision-records
   action:
     - key: get-simulation-status
       name: Get Simulation Status
@@ -29,6 +31,16 @@ modules:
       function: rovo-action-handler
       actionVerb: GET
       description: Compares candidate flood interventions against the standardized storm baseline.
+    - key: get-decision-record
+      name: Get Decision Record
+      function: rovo-action-handler
+      actionVerb: GET
+      description: Retrieves an immutable, human-approved mitigation decision record by ID.
+    - key: list-decision-records
+      name: List Decision Records
+      function: rovo-action-handler
+      actionVerb: GET
+      description: Lists recent immutable hydraulic mitigation decision records.
   function:
     - key: rovo-action-handler
       handler: resolvers/index.handler

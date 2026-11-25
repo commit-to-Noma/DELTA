@@ -11,8 +11,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@forge/api": "^8.5.1",
     "@forge/bridge": "^7.4.0",
+    "@forge/kvs": "^2.1.3",
     "@forge/resolver": "^2.0.2",
+    "@forge/storage": "^2.0.3",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
     "react": "^18.3.1",

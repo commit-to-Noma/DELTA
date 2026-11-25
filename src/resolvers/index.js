@@ -1,9 +1,28 @@
 import Resolver from '@forge/resolver';
+import {
+  recordDecision,
+  getDecision,
+  getDecisionForIssue,
+  listDecisions,
+  validateDecisionPayload,
+  getStorageClient,
+  __resetInMemoryStore
+} from './decisionStorage.js';
+
+export {
+  recordDecision,
+  getDecision,
+  getDecisionForIssue,
+  listDecisions,
+  validateDecisionPayload,
+  getStorageClient,
+  __resetInMemoryStore
+};
 
 const resolver = new Resolver();
 
 // Data payload definitions
-const NOMINAL_SIMULATION_STATUS = {
+export const NOMINAL_SIMULATION_STATUS = {
   sector: 'Boston Longwood Medical Area & Muddy River Catchment',
   gridDimensions: '64x64 regular Cartesian (25m cell, 2.56 km²)',
   status: 'NOMINAL_BASELINE',
@@ -25,7 +44,7 @@ const NOMINAL_SIMULATION_STATUS = {
   }
 };
 
-const CANDIDATE_INTERVENTIONS = {
+export const CANDIDATE_INTERVENTIONS = {
   evaluatedAgainstStorm: 'NOAA Atlas 14 100-Year 6-Hour Design Event (122.0 mm total depth)',
   candidates: [
     {
@@ -57,6 +76,26 @@ resolver.define('get-simulation-status', async () => NOMINAL_SIMULATION_STATUS);
 resolver.define('evaluateInterventions', async () => CANDIDATE_INTERVENTIONS);
 resolver.define('evaluate-interventions', async () => CANDIDATE_INTERVENTIONS);
 
+// Decision Record KVS operations (Custom UI Bridge)
+resolver.define('recordDecision', async (req) => {
+  const payload = req?.payload || req;
+  return await recordDecision(payload);
+});
+
+resolver.define('getDecision', async (req) => {
+  const decisionId = req?.payload?.decisionId || req?.payload || req?.decisionId;
+  return await getDecision(decisionId);
+});
+
+resolver.define('listDecisions', async () => {
+  return await listDecisions();
+});
+
+resolver.define('getDecisionForIssue', async (req) => {
+  const issueKey = req?.payload?.issueKey || req?.payload || req?.issueKey;
+  return await getDecisionForIssue(issueKey);
+});
+
 const customUiHandler = resolver.getDefinitions();
 
 /**
@@ -72,6 +111,7 @@ export async function handler(event, context) {
 
   // Case B: Rovo Action or direct backend call
   const actionKey = event?.action?.key || event?.actionKey || event?.key || 'unknown';
+  const payload = event?.payload || {};
 
   switch (actionKey) {
     case 'get-simulation-status':
@@ -88,13 +128,32 @@ export async function handler(event, context) {
         data: CANDIDATE_INTERVENTIONS
       };
 
+    case 'get-decision-record':
+    case 'getDecisionRecord':
+    case 'getDecision':
+      return await getDecision(payload.decisionId);
+
+    case 'list-decision-records':
+    case 'listDecisions':
+      return await listDecisions();
+
+    case 'record-decision':
+    case 'recordDecision':
+      return await recordDecision(payload);
+
     default:
       return {
         success: false,
         error: {
           code: 'UNRECOGNIZED_ACTION',
           message: `Action key '${actionKey}' is not supported by DELTA Hydraulic Advisor.`,
-          supportedActions: ['get-simulation-status', 'evaluate-interventions']
+          supportedActions: [
+            'get-simulation-status',
+            'evaluate-interventions',
+            'get-decision-record',
+            'list-decision-records',
+            'record-decision'
+          ]
         }
       };
   }

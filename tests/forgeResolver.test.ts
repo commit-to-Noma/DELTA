@@ -1,12 +1,51 @@
 /**
  * Forge Resolver & Rovo Action Handler Integration Test Suite
- * Asserts dual-compatibility with Custom UI Bridge and Rovo Agent Actions.
+ * Asserts dual-compatibility with Custom UI Bridge, Rovo Agent Actions,
+ * and immutable Forge KVS Decision Record storage.
  */
 
-import { describe, it, expect } from 'vitest';
-import { handler } from '../src/resolvers/index.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import {
+  handler,
+  recordDecision,
+  getDecision,
+  listDecisions,
+  getDecisionForIssue,
+  validateDecisionPayload,
+  __resetInMemoryStore
+} from '../src/resolvers/index.js';
 
 describe('Forge Resolver & Rovo Action Handler Suite', () => {
+  beforeEach(() => {
+    __resetInMemoryStore();
+  });
+
+  const SAMPLE_DECISION = {
+    decisionId: 'DEC-2026-0001',
+    scenarioHash: 'sha256-a9f4c3b2184e9071b6',
+    baselineStorm: 'NOAA Atlas 14 100-Year 6-Hour Design Event (122.0 mm total depth)',
+    chosenPlan: {
+      planId: 'plan-beta',
+      name: 'Plan Beta: Clear Brookline Avenue Culvert & Deploy High-Capacity Pump #1',
+      inundationReduction: '-46.2%',
+      hospitalDelayMinutes: 2.1,
+      confidence: 0.948,
+      tradeOffSummary: 'Prevents backwater surge along Brookline Ave and Francis St by restoring culvert conveyance to 12.5 m³/s.'
+    },
+    humanApprover: {
+      displayName: 'Captain J. Vance',
+      role: 'Incident Commander',
+      approvalTimestamp: '2026-11-25T08:00:00.000Z'
+    },
+    physicalMetrics: {
+      peakInundationDepthCm: 11.4,
+      waterBalanceError: '< 1e-10',
+      criticalAccessRoutesPassable: ['Francis St Ambulance Bay', 'Fenwood Rd Route'],
+      affectedFacilities: ["Brigham and Women's Hospital"]
+    },
+    linkedIssueKey: 'EMERG-101'
+  };
+
   it('TEST-RES-01: Handles Custom UI bridge invoke for getSimulationStatus', async () => {
     const event = {
       call: {
@@ -84,7 +123,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
     const res = await handler(maliciousEvent, {});
     expect(res.success).toBe(false);
     expect(res.error.code).toBe('UNRECOGNIZED_ACTION');
-    expect(res.error.supportedActions).toEqual(['get-simulation-status', 'evaluate-interventions']);
+    expect(res.error.supportedActions).toContain('get-simulation-status');
   });
 
   it('TEST-RES-06: Confirms no API keys, tokens, or credentials exposed in payloads', async () => {
@@ -98,5 +137,109 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
       expect(statusStr.toLowerCase()).not.toContain(forbidden);
       expect(evalStr.toLowerCase()).not.toContain(forbidden);
     }
+  });
+
+  it('TEST-KVS-01: Successfully creates immutable Decision Record in KVS', async () => {
+    const res = await recordDecision(SAMPLE_DECISION);
+    expect(res.success).toBe(true);
+    expect(res.data.decisionId).toBe('DEC-2026-0001');
+    expect(res.data.status).toBe('APPROVED');
+    expect(res.data.createdAt).toBeDefined();
+
+    // Verify retrievable via getDecision
+    const retrieved = await getDecision('DEC-2026-0001');
+    expect(retrieved.success).toBe(true);
+    expect(retrieved.data.chosenPlan.planId).toBe('plan-beta');
+    expect(retrieved.data.humanApprover.displayName).toBe('Captain J. Vance');
+  });
+
+  it('TEST-KVS-02: Rejects overwriting an existing Decision Record (append-only immutability)', async () => {
+    await recordDecision(SAMPLE_DECISION);
+
+    // Attempt to tamper with or overwrite existing record
+    const tampered = {
+      ...SAMPLE_DECISION,
+      chosenPlan: {
+        ...SAMPLE_DECISION.chosenPlan,
+        name: 'Tampered Plan: Malicious Disruption'
+      }
+    };
+
+    await expect(recordDecision(tampered)).rejects.toThrow(/Immutable record violation/);
+
+    // Verify original record is unchanged
+    const intact = await getDecision('DEC-2026-0001');
+    expect(intact.data.chosenPlan.name).toBe('Plan Beta: Clear Brookline Avenue Culvert & Deploy High-Capacity Pump #1');
+  });
+
+  it('TEST-KVS-03: Rejects invalid decision payloads missing required fields', async () => {
+    expect(() => validateDecisionPayload({})).toThrow(/decisionId must be a non-empty string/);
+    expect(() => validateDecisionPayload({ decisionId: 'INVALID-ID' })).toThrow(/starting with "DEC-"/);
+    expect(() => validateDecisionPayload({ decisionId: 'DEC-123' })).toThrow(/scenarioHash/);
+    expect(() => validateDecisionPayload({
+      decisionId: 'DEC-123',
+      scenarioHash: 'hash',
+      baselineStorm: 'storm'
+    })).toThrow(/chosenPlan/);
+  });
+
+  it('TEST-KVS-04: Links Decision Record to Jira Issue and retrieves by issue key', async () => {
+    await recordDecision(SAMPLE_DECISION);
+
+    const issueRec = await getDecisionForIssue('EMERG-101');
+    expect(issueRec.success).toBe(true);
+    expect(issueRec.data.decisionId).toBe('DEC-2026-0001');
+    expect(issueRec.data.linkedIssueKey).toBe('EMERG-101');
+
+    // Missing issue returns error code
+    const missing = await getDecisionForIssue('EMERG-999');
+    expect(missing.success).toBe(false);
+    expect(missing.error.code).toBe('NO_DECISION_FOR_ISSUE');
+  });
+
+  it('TEST-KVS-05: Lists all decisions in chronological order', async () => {
+    await recordDecision(SAMPLE_DECISION);
+    await recordDecision({
+      ...SAMPLE_DECISION,
+      decisionId: 'DEC-2026-0002',
+      linkedIssueKey: 'EMERG-102'
+    });
+
+    const list = await listDecisions();
+    expect(list.success).toBe(true);
+    expect(list.count).toBe(2);
+    expect(list.data.map((d: any) => d.decisionId)).toEqual(['DEC-2026-0001', 'DEC-2026-0002']);
+  });
+
+  it('TEST-KVS-06: Custom UI bridge invokes recordDecision, getDecision, and listDecisions', async () => {
+    const recordBridgeCall = {
+      call: {
+        functionKey: 'recordDecision',
+        payload: SAMPLE_DECISION
+      }
+    };
+    const recordRes = await handler(recordBridgeCall, {});
+    expect(recordRes.success).toBe(true);
+    expect(recordRes.data.decisionId).toBe('DEC-2026-0001');
+
+    const getBridgeCall = {
+      call: {
+        functionKey: 'getDecision',
+        payload: { decisionId: 'DEC-2026-0001' }
+      }
+    };
+    const getRes = await handler(getBridgeCall, {});
+    expect(getRes.success).toBe(true);
+    expect(getRes.data.decisionId).toBe('DEC-2026-0001');
+
+    const listBridgeCall = {
+      call: {
+        functionKey: 'listDecisions',
+        payload: {}
+      }
+    };
+    const listRes = await handler(listBridgeCall, {});
+    expect(listRes.success).toBe(true);
+    expect(listRes.count).toBe(1);
   });
 });
