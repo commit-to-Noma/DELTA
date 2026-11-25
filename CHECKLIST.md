@@ -56,10 +56,10 @@
 
 ---
 
-## [ ] Phase 2: Dynamic Disruption & In-Flight Replanning
-- [ ] **2.1 Disruption State Manager**: Model culvert debris blockages (e.g. 80% loss of Muddy River gravity inlet capacity), emergency road closures, and localized pump failures with explicit before/after delta states.
-- [ ] **2.2 Live 2D Recalculation Engine**: Recompute downstream overland flood propagation and emergency hospital artery accessibility using the 2D diffusive-wave solver with adaptive sub-stepping.
-- [ ] **2.3 Causal Replanning Engine**: Automatically compute changes in critical hospital ingress/egress routes and generate clear, deterministic engineering justifications for why initial plans failed.
+## [x] Phase 2: Dynamic Disruption & In-Flight Replanning
+- [x] **2.1 Disruption State Manager**: Implemented `src/simulation/disruptionEngine.ts` cataloguing authoritative catchment disruptions (`CULVERT-01-BROOKLINE` 100% complete debris choke, `CULVERT-02-FENWAY-CHOKE` 75% constriction, `DRAIN-03-LONGWOOD-WEST` sump loss) with explicit nominal vs. disrupted conveyance states.
+- [x] **2.2 Live 2D Recalculation Engine**: Coupled 2D diffusive-wave hydraulic solver (`stepHydraulics`) to recalculate baseline vs. disrupted flood waves across the 64×64 grid with adaptive sub-stepping. Recomputes retained surface volume, choke point depth rise, and grid depth array.
+- [x] **2.3 Causal Replanning Engine & Hospital Passability**: Evaluates passability across all 5 real hospital complexes (Brigham & Women's, Boston Children's, BIDMC East/West, Dana-Farber) and critical emergency roads using documented depth thresholds ($\ge 0.30\text{ m}$ impassable, $\ge 0.10\text{ m}$ caution). Automatically generates deterministic, physics-derived causal engineering explanations and tactical shift recommendations. Integrated interactive reactor into `DisruptionsView.tsx`. Verified with 7 automated tests in `tests/disruptionEngine.test.ts` (107/107 total suite tests passing).
 
 ---
 
