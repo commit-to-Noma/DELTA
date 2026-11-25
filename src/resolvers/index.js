@@ -8,6 +8,10 @@ import {
   getStorageClient,
   __resetInMemoryStore
 } from './decisionStorage.js';
+import {
+  createDispatchTicket,
+  buildDispatchAdfDescription
+} from './jsmDispatcher.js';
 
 export {
   recordDecision,
@@ -16,7 +20,9 @@ export {
   listDecisions,
   validateDecisionPayload,
   getStorageClient,
-  __resetInMemoryStore
+  __resetInMemoryStore,
+  createDispatchTicket,
+  buildDispatchAdfDescription
 };
 
 const resolver = new Resolver();
@@ -96,6 +102,17 @@ resolver.define('getDecisionForIssue', async (req) => {
   return await getDecisionForIssue(issueKey);
 });
 
+// JSM Field Dispatch Ticket Creation (Custom UI Bridge)
+resolver.define('createDispatchTicket', async (req) => {
+  const payload = req?.payload || req;
+  return await createDispatchTicket(payload);
+});
+
+resolver.define('dispatchFieldTeam', async (req) => {
+  const payload = req?.payload || req;
+  return await createDispatchTicket(payload);
+});
+
 const customUiHandler = resolver.getDefinitions();
 
 /**
@@ -141,6 +158,10 @@ export async function handler(event, context) {
     case 'recordDecision':
       return await recordDecision(payload);
 
+    case 'dispatch-field-team':
+    case 'createDispatchTicket':
+      return await createDispatchTicket(payload);
+
     default:
       return {
         success: false,
@@ -152,7 +173,8 @@ export async function handler(event, context) {
             'evaluate-interventions',
             'get-decision-record',
             'list-decision-records',
-            'record-decision'
+            'record-decision',
+            'dispatch-field-team'
           ]
         }
       };
