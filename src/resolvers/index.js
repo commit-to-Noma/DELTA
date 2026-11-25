@@ -3,6 +3,7 @@ import {
   recordDecision,
   getDecision,
   getDecisionForIssue,
+  linkDecisionToIssue,
   listDecisions,
   validateDecisionPayload,
   getStorageClient,
@@ -41,6 +42,7 @@ export {
   recordDecision,
   getDecision,
   getDecisionForIssue,
+  linkDecisionToIssue,
   listDecisions,
   validateDecisionPayload,
   getStorageClient,
@@ -297,6 +299,22 @@ resolver.define('listDecisions', async () => {
 resolver.define('getDecisionForIssue', async (req) => {
   const issueKey = req?.payload?.issueKey || req?.payload || req?.issueKey;
   return await getDecisionForIssue(issueKey);
+});
+
+resolver.define('linkDecisionToIssue', async (req) => {
+  try {
+    const payload = req?.payload || req;
+    return await linkDecisionToIssue(payload, null, req?.context);
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        code: err.code || 'LINK_DECISION_FAILED',
+        message: err.message,
+        details: err.details
+      }
+    };
+  }
 });
 
 // JSM Field Dispatch Ticket Creation (Custom UI Bridge)

@@ -354,6 +354,115 @@ export async function getDecisionForIssue(issueKey, storageOverride = null) {
 }
 
 /**
+ * Authoritatively links an approved Decision Record to a target Jira Issue.
+ * Enforces:
+ * 1. Target issueKey belongs to OPERATIONAL_PROJECT_KEY ('EMERG-').
+ * 2. Caller has verified Incident Commander authorization.
+ * 3. Target decision exists in KVS and status === 'APPROVED'.
+ * 4. Updates bidirectional pointer mapping (issue-decision:<issueKey> and decision.linkedIssueKey).
+ */
+export async function linkDecisionToIssue({ issueKey, decisionId }, storageOverride = null, authContext = null) {
+  if (!issueKey || typeof issueKey !== 'string') {
+    const err = new Error('issueKey is required and must be a non-empty string');
+    err.code = 'MISSING_ISSUE_KEY';
+    throw err;
+  }
+
+  if (!decisionId || typeof decisionId !== 'string') {
+    const err = new Error('decisionId is required and must be a non-empty string');
+    err.code = 'MISSING_DECISION_ID';
+    throw err;
+  }
+
+  // Strict Project Scoping: Must belong to OPERATIONAL_PROJECT_KEY ('EMERG')
+  if (!issueKey.startsWith(`${OPERATIONAL_PROJECT_KEY}-`)) {
+    const err = new Error(
+      `Project scope mismatch: Linked issue '${issueKey}' does not belong to server-configured project '${OPERATIONAL_PROJECT_KEY}'.`
+    );
+    err.code = 'INVALID_PROJECT_SCOPE';
+    throw err;
+  }
+
+  // Resolve caller session authentication
+  let serverAccountId = null;
+  if (authContext && typeof authContext === 'object') {
+    serverAccountId =
+      authContext.accountId ||
+      authContext.principal?.accountId ||
+      authContext.context?.accountId ||
+      authContext.context?.principal?.accountId ||
+      null;
+  }
+
+  if (!serverAccountId || typeof serverAccountId !== 'string' || serverAccountId === 'anonymous') {
+    const err = new Error(
+      'Authentication failure: Missing or unverified Jira user session context. Linking decisions to issues requires an authenticated caller.'
+    );
+    err.code = 'UNAUTHENTICATED_SESSION';
+    throw err;
+  }
+
+  // Verify Incident Commander authorization
+  const auth = await verifyIncidentCommanderAuthorization({
+    accountId: serverAccountId,
+    projectKey: OPERATIONAL_PROJECT_KEY,
+    customAuthPolicy: authContext?.customAuthPolicy
+  });
+
+  if (!auth.isAuthorized) {
+    const err = new Error(
+      `Incident Commander authorization denied for account '${serverAccountId}': ${auth.reason || 'User lacks required role to link decisions.'}`
+    );
+    err.code = 'UNAUTHORIZED_INCIDENT_COMMANDER';
+    err.details = auth;
+    throw err;
+  }
+
+  const client = getStorageClient(storageOverride);
+
+  // Retrieve candidate decision
+  const decisionRecord = await client.get(`decision:${decisionId}`);
+  if (!decisionRecord) {
+    const err = new Error(`Decision not found: No record found for identifier '${decisionId}'.`);
+    err.code = 'DECISION_NOT_FOUND';
+    throw err;
+  }
+
+  // Enforce APPROVED status requirement
+  if (decisionRecord.status !== 'APPROVED') {
+    const err = new Error(
+      `Unapproved decision: Decision '${decisionId}' has status '${decisionRecord.status}'. Only APPROVED decision records can be linked to operational Jira incident issues.`
+    );
+    err.code = 'UNAPPROVED_DECISION_LINK';
+    throw err;
+  }
+
+  // Set issue-decision pointer
+  await client.set(`issue-decision:${issueKey}`, decisionId);
+
+  // Update decision record with linkage provenance
+  const updatedRecord = {
+    ...decisionRecord,
+    linkedIssueKey: issueKey,
+    linkedAt: new Date().toISOString(),
+    linkedByAccountId: serverAccountId
+  };
+  await client.set(`decision:${decisionId}`, updatedRecord);
+
+  return {
+    success: true,
+    data: {
+      issueKey,
+      decisionId,
+      status: decisionRecord.status,
+      chosenPlan: decisionRecord.chosenPlan,
+      linkedBy: serverAccountId,
+      linkedAt: updatedRecord.linkedAt
+    }
+  };
+}
+
+/**
  * Lists all recorded decision identifiers and summaries.
  */
 export async function listDecisions(storageOverride = null) {

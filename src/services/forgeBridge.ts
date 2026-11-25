@@ -109,5 +109,72 @@ export async function invokeSafe(functionKey: string, payload?: any): Promise<an
     };
   }
 
+  if (functionKey === 'getDecisionForIssue') {
+    const issueKey = payload?.issueKey || payload;
+    try {
+      const stored = localStorage.getItem('delta_local_decisions');
+      const list = stored ? JSON.parse(stored) : [];
+      const found = list.find((d: any) => d.linkedIssueKey === issueKey);
+      if (found) {
+        return { success: true, data: found };
+      }
+      return { success: false, error: { code: 'NO_DECISION_FOR_ISSUE', message: `No approved decision record has been linked to Jira issue '${issueKey}'.` } };
+    } catch {
+      return { success: false, error: { code: 'NO_DECISION_FOR_ISSUE', message: 'Failed to access local store' } };
+    }
+  }
+
+  if (functionKey === 'linkDecisionToIssue') {
+    const { issueKey, decisionId } = payload || {};
+    try {
+      const stored = localStorage.getItem('delta_local_decisions');
+      const list = stored ? JSON.parse(stored) : [];
+      const item = list.find((d: any) => d.decisionId === decisionId);
+      if (!item) {
+        return { success: false, error: { code: 'DECISION_NOT_FOUND', message: `No record found for identifier '${decisionId}'.` } };
+      }
+      item.linkedIssueKey = issueKey;
+      item.linkedAt = new Date().toISOString();
+      localStorage.setItem('delta_local_decisions', JSON.stringify(list));
+      return { success: true, data: { issueKey, decisionId, status: item.status, chosenPlan: item.chosenPlan } };
+    } catch (e: any) {
+      return { success: false, error: { code: 'LINK_FAILED', message: e?.message || String(e) } };
+    }
+  }
+
   return { success: true, data: null };
+}
+
+/**
+ * Returns Forge view context (e.g. extension type, issue key) safely in both
+ * live Forge Custom UI iframes and standalone preview.
+ */
+export async function getContextSafe(): Promise<any> {
+  const isRunningInIframe = typeof window !== 'undefined' && window.parent !== window;
+  if (isRunningInIframe) {
+    try {
+      const bridge = await import('@forge/bridge');
+      if (bridge.view && typeof bridge.view.getContext === 'function') {
+        const ctx = await bridge.view.getContext();
+        if (ctx) return ctx;
+      }
+    } catch (e) {
+      console.warn('[DELTA] Forge view.getContext unavailable:', e);
+    }
+  }
+
+  // Standalone browser preview parameters
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const isPanel = params?.get('view') === 'panel';
+  const issueKey = params?.get('issue') || 'EMERG-101';
+
+  return {
+    extension: {
+      type: isPanel ? 'jira:issuePanel' : 'jira:projectPage',
+      issue: {
+        key: issueKey,
+        id: '10001'
+      }
+    }
+  };
 }

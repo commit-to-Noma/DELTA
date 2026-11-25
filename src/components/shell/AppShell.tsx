@@ -12,7 +12,8 @@ import {
   Home, 
   Menu, 
   X,
-  User
+  User,
+  LayoutList
 } from 'lucide-react';
 import { OverviewDistrictView } from './views/OverviewDistrictView';
 import { FloodSimulationView } from './views/FloodSimulationView';
@@ -20,8 +21,9 @@ import { DisruptionsView } from './views/DisruptionsView';
 import { InterventionsView } from './views/InterventionsView';
 import { DecisionRecordsView } from './views/DecisionRecordsView';
 import { OperationalTicketsView } from './views/OperationalTicketsView';
+import { IssuePanel } from '../jira/IssuePanel';
 
-export type ShellTab = 'overview' | 'simulation' | 'disruptions' | 'interventions' | 'decisions' | 'tickets';
+export type ShellTab = 'overview' | 'simulation' | 'disruptions' | 'interventions' | 'decisions' | 'tickets' | 'issue-panel';
 
 interface AppShellProps {
   onExitToLanding: () => void;
@@ -40,6 +42,7 @@ export const AppShell: React.FC<AppShellProps> = ({ onExitToLanding }) => {
     { id: 'interventions', label: 'Intervention Planner', icon: BarChart3, code: '04' },
     { id: 'decisions', label: 'Decision Records', icon: ShieldCheck, code: '05' },
     { id: 'tickets', label: 'Operational Tickets', icon: Ticket, code: '06' },
+    { id: 'issue-panel', label: 'Jira Issue Panel', icon: LayoutList, code: '07' },
   ];
 
   return (
@@ -231,6 +234,21 @@ export const AppShell: React.FC<AppShellProps> = ({ onExitToLanding }) => {
             )}
 
             {activeTab === 'tickets' && <OperationalTicketsView />}
+
+            {activeTab === 'issue-panel' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between bg-onyx-900 border border-onyx-800 p-3 rounded font-mono text-xs text-storm-300">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-safety-orange" />
+                    <span>JIRA ISSUE PANEL SIMULATION HARNESS // PREVIEWING EMBEDDED CONTEXT</span>
+                  </div>
+                  <div className="text-[11px] text-storm-400">
+                    Target: <code>EMERG-101</code> (Incident: Longwood Hospital Corridor Flood Wave)
+                  </div>
+                </div>
+                <IssuePanel initialIssueKey="EMERG-101" onOpenFullApp={() => setActiveTab('simulation')} />
+              </div>
+            )}
           </div>
         </main>
       </div>

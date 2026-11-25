@@ -5,6 +5,13 @@ modules:
       title: DELTA Engine
       resolver:
         function: rovo-action-handler
+  jira:issuePanel:
+    - key: delta-decision-issue-panel
+      title: DELTA Flood Mitigation Decision
+      icon: https://raw.githubusercontent.com/commit-to-Noma/DELTA/main/public/favicon.svg
+      resource: main-ui
+      resolver:
+        function: rovo-action-handler
   jira:workflowValidator:
     - key: delta-decision-record-validator
       name: DELTA Decision Record Approval Gate
