@@ -389,7 +389,7 @@ export const FloodSimulationView: React.FC = () => {
             </div>
 
             {/* Layer Toggles */}
-            <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               <button
                 onClick={() => toggleLayer('satellite')}
                 className={`px-2 py-0.5 rounded text-[10px] transition-colors ${

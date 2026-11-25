@@ -215,9 +215,9 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
                   : 'bg-onyx-900 border-emerald-900/60 hover:border-emerald-700'
               }`}
             >
-              <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-                <span className="font-bold text-emerald-300 uppercase text-sm">PLAN GAMMA</span>
-                <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-600 text-[10px] font-bold">
+              <div className="flex flex-wrap items-center justify-between gap-1 pb-2 border-b border-onyx-800">
+                <span className="font-bold text-emerald-300 uppercase text-xs sm:text-sm">PLAN GAMMA</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-600 text-[9px] sm:text-[10px] font-bold whitespace-nowrap">
                   RECOMMENDED 🏆
                 </span>
               </div>
