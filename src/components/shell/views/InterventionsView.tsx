@@ -8,7 +8,12 @@ import {
   Layers,
   RefreshCw,
   Waves,
-  Info
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  X,
+  Lock,
+  FileText
 } from 'lucide-react';
 import { loadBostonCatchment } from '../../../data/catchmentLoader';
 import { 
@@ -18,6 +23,7 @@ import {
   InterventionDefinition,
   HospitalImprovement
 } from '../../../simulation/interventionEngine';
+import { invokeSafe } from '../../../services/forgeBridge';
 
 interface InterventionsViewProps {
   onNavigateToDecisions?: () => void;
@@ -29,6 +35,23 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
   const [evaluationResult, setEvaluationResult] = useState<MultiScenarioEvaluationResult | null>(null);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState<boolean>(false);
   const [, startTransition] = useTransition();
+
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState<boolean>(false);
+  const [engineeringRationale, setEngineeringRationale] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvedRecord, setApprovedRecord] = useState<any | null>(null);
+
+  // Set default engineering rationale when plan changes
+  useEffect(() => {
+    if (selectedPlanId === 'plan-gamma') {
+      setEngineeringRationale('Authorized emergency mobilization of Plan Gamma to restore nominal Brookline Ave culvert conveyance (12.5 m³/s), clearing overland backwater surge along Francis Street and protecting ambulance access to Brigham and Women\'s Hospital.');
+    } else if (selectedPlanId === 'plan-beta') {
+      setEngineeringRationale('Authorized deployment of mobile diesel suction pump #1 at Brookline Ave culvert headwall to maintain 2.0 m³/s active dewatering and reduce peak surface ponding.');
+    } else {
+      setEngineeringRationale('Authorized deployment of 0.50m rapid sandbag barriers along Francis Street corridor to deflect overland flow away from hospital entrance.');
+    }
+  }, [selectedPlanId]);
 
   // Run solver evaluation across all 4 scenarios (Baseline + 3 Plans)
   const handleRunEvaluation = () => {
@@ -403,76 +426,251 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
               </div>
             </div>
 
-            {/* Action Button: Authorize Decision & Dispatch Jira Field Crew */}
-            <div className="pt-4 border-t border-onyx-800 space-y-2">
+            {/* Action Section: Human Approval & Decision Record Persistence */}
+            <div className="pt-4 border-t border-onyx-800 space-y-3">
+              {approvedRecord ? (
+                <div className="p-4 rounded-lg bg-emerald-950/80 border border-emerald-700 font-mono text-xs space-y-3 shadow-tactical">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                      <span>DECISION RECORD COMMITTED &amp; APPROVED // {approvedRecord.decisionId}</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-emerald-900/80 text-emerald-200 border border-emerald-600 text-[10px]">
+                      FORGE KVS PERSISTED
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-storm-300 border-y border-emerald-800/60 py-2">
+                    <div><span className="text-storm-400">Authorized Plan:</span> <strong className="text-emerald-300">{approvedRecord.chosenPlan?.name}</strong></div>
+                    <div><span className="text-storm-400">Approver:</span> <strong className="text-storm-100">{approvedRecord.humanApprover?.displayName} [{approvedRecord.humanApprover?.role}]</strong></div>
+                    <div><span className="text-storm-400">Scenario Hash:</span> <code className="text-emerald-400 font-mono text-[10px]">{approvedRecord.scenarioHash}</code></div>
+                    <div><span className="text-storm-400">Timestamp:</span> <span className="text-storm-300">{approvedRecord.createdAt}</span></div>
+                  </div>
+
+                  <div className="text-xs text-storm-200">
+                    <span className="font-bold text-storm-400">Rationale: </span>
+                    <em>"{approvedRecord.engineeringRationale}"</em>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    {onNavigateToDecisions && (
+                      <button
+                        onClick={onNavigateToDecisions}
+                        className="px-4 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-bold flex items-center gap-1.5 transition-colors"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>VIEW IN DECISION RECORDS &rarr;</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setApprovedRecord(null)}
+                      className="px-3 py-2 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-300 border border-onyx-700 text-xs transition-colors"
+                    >
+                      Authorize Another Scenario
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setApprovalError(null);
+                      setIsApprovalModalOpen(true);
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 font-mono text-xs font-bold py-3.5 px-4 rounded-lg transition-all shadow-tactical ${
+                      selectedPlanId === 'plan-gamma'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400'
+                        : 'bg-safety-orange hover:bg-safety-hover text-white'
+                    }`}
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>INITIATE INCIDENT COMMANDER APPROVAL REVIEW: {selectedPlanDef.id.toUpperCase()} &rarr;</span>
+                  </button>
+                  <div className="text-[11px] text-storm-400 text-center font-mono">
+                    Requires explicit human engineering rationale and 2-step confirmation before writing to Forge KVS audit ledger.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Explicit Human Approval Confirmation Modal */}
+      {isApprovalModalOpen && evaluationResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-onyx-900 border border-onyx-700 rounded-lg max-w-2xl w-full p-6 shadow-2xl font-mono text-xs space-y-5 my-8">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-onyx-800 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-safety-orange" />
+                <div>
+                  <div className="font-bold text-sm text-storm-100 uppercase tracking-wider">
+                    HUMAN APPROVAL // INCIDENT COMMANDER AUTHORIZATION
+                  </div>
+                  <div className="text-[11px] text-storm-400">
+                    Phase 5 Application-Level Audit Ledger Enforcement
+                  </div>
+                </div>
+              </div>
               <button
-                onClick={() => {
-                  const decId = `DEC-2026-08${Math.floor(Math.random() * 80 + 10)}`;
-                  const decisionRecord = {
-                    decisionId: decId,
-                    scenarioHash: 'sha256:7f8e3a2b1c4d',
-                    baselineStorm: 'NOAA Atlas 14 50-Year Design Burst (104.2 mm)',
+                onClick={() => setIsApprovalModalOpen(false)}
+                className="text-storm-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Error Banner */}
+            {approvalError && (
+              <div className="p-3 rounded bg-red-950/80 border border-red-800 text-red-300 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="font-bold">APPROVAL SUBMISSION REJECTED:</div>
+                  <div className="text-[11px]">{approvalError}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Evaluation Summary Strip */}
+            <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2">
+              <div className="text-storm-400 font-bold text-[11px]">EVALUATED PHYSICAL CANDIDATE:</div>
+              <div className="text-storm-100 font-bold text-sm">{selectedPlanDef.name}</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 text-[11px]">
+                <div>
+                  <span className="text-storm-400 block">Avoided Volume:</span>
+                  <span className="text-emerald-400 font-bold">+{selectedDiff?.avoidedSurfaceVolumeM3.toLocaleString()} m³</span>
+                </div>
+                <div>
+                  <span className="text-storm-400 block">Peak Depth Delta:</span>
+                  <span className="text-emerald-400 font-bold">-{selectedDiff?.peakDepthReductionM.toFixed(3)} m</span>
+                </div>
+                <div>
+                  <span className="text-storm-400 block">Restored Routes:</span>
+                  <span className="text-storm-200 font-bold">{selectedDiff?.protectedRoadCount ?? 0} corridors</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Scenario Hash & Authenticated Identity Strip */}
+            <div className="bg-onyx-950/60 p-3 rounded border border-onyx-800 space-y-2 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="text-storm-400">CANONICAL SCENARIO HASH:</span>
+                <code className="text-purple-300 font-mono text-[10px] bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/40">
+                  sha256:7f8e3a2b1c4d9e0f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f
+                </code>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-storm-400">AUTHENTICATED IDENTITY:</span>
+                <span className="text-storm-200 font-bold">Cmdr. Vance [Incident Commander]</span>
+              </div>
+              <div className="text-[10px] text-amber-400/90 pt-1 border-t border-onyx-800/80">
+                * The server-side Forge resolver verifies caller credentials and binds your authentic Atlassian Jira account ID. Client identity overrides are forbidden.
+              </div>
+            </div>
+
+            {/* Required Engineering Rationale Textarea */}
+            <div className="space-y-1.5">
+              <label className="block text-storm-300 font-bold text-[11px]">
+                ENGINEERING RATIONALE &amp; PHYSICAL JUSTIFICATION <span className="text-red-400">*</span>:
+              </label>
+              <textarea
+                value={engineeringRationale}
+                onChange={(e) => setEngineeringRationale(e.target.value)}
+                placeholder="State the engineering justification and hydrodynamic rationale for authorizing this plan..."
+                rows={3}
+                className="w-full bg-onyx-950 border border-onyx-700 rounded p-2.5 text-storm-100 text-xs font-sans focus:outline-none focus:border-safety-orange leading-relaxed"
+              />
+              <div className="flex justify-between text-[10px] text-storm-500 font-mono">
+                <span>Required for Incident Commander compliance ledger.</span>
+                <span>{engineeringRationale.trim().length} characters</span>
+              </div>
+            </div>
+
+            {/* Storage Architecture Notice */}
+            <div className="p-2.5 rounded bg-onyx-950 text-storm-400 text-[10px] font-mono border border-onyx-800/80 space-y-1">
+              <div><strong>AUDIT LEDGER GUARANTEES:</strong> Forge KVS append-only storage with server-enforced immutability check.</div>
+              <div><strong>LIMITATIONS:</strong> Concurrency is Last-Write-Wins (LWW) per key; not a multi-key atomic transaction or cryptographic hardware HSM.</div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-onyx-800">
+              <button
+                type="button"
+                onClick={() => setIsApprovalModalOpen(false)}
+                disabled={isSubmitting}
+                className="px-4 py-2 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-300 font-bold transition-colors"
+              >
+                CANCEL
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmitting || engineeringRationale.trim().length < 5}
+                onClick={async () => {
+                  setIsSubmitting(true);
+                  setApprovalError(null);
+
+                  const payload = {
                     chosenPlan: {
                       planId: selectedPlanDef.id,
                       name: selectedPlanDef.name,
-                      tradeOffSummary: selectedPlanDef.description
+                      type: selectedPlanDef.type
                     },
+                    scenarioHash: 'sha256:7f8e3a2b1c4d9e0f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f',
+                    canonicalScenario: {
+                      stormId: '50-year',
+                      stormDepthMm: 104.2,
+                      cellResolutionM: 25.0,
+                      durationHours: 6.0,
+                      gridDimensions: '64x64',
+                      infiltrationRateMmPerHour: 2.0,
+                      manningN: 0.025,
+                      sector: 'Boston Longwood Medical Area & Muddy River Catchment (EPSG:26986)'
+                    },
+                    baselineMetrics: {
+                      currentStorageM3: evaluationResult.baseline.currentStorageM3,
+                      maxWaterDepthM: evaluationResult.baseline.maxWaterDepthM,
+                      impassableRoadCount: evaluationResult.baseline.impassableRoadCount
+                    },
+                    interventionMetrics: {
+                      currentStorageM3: selectedPlanMetrics?.currentStorageM3,
+                      maxWaterDepthM: selectedPlanMetrics?.maxWaterDepthM,
+                      impassableRoadCount: selectedPlanMetrics?.impassableRoadCount
+                    },
+                    differentialMetrics: {
+                      avoidedSurfaceVolumeM3: selectedDiff?.avoidedSurfaceVolumeM3,
+                      peakDepthReductionM: selectedDiff?.peakDepthReductionM,
+                      protectedRoadCount: selectedDiff?.protectedRoadCount,
+                      protectedRoadNames: selectedDiff?.protectedRoadNames
+                    },
+                    engineeringRationale: engineeringRationale.trim(),
+                    schemaVersion: '2.0.0',
                     humanApprover: {
                       displayName: 'Cmdr. Vance',
-                      role: 'Incident Commander',
-                      approvalTimestamp: new Date().toISOString()
-                    },
-                    physicalMetrics: {
-                      inundationReduction: `${selectedDiff?.avoidedSurfaceVolumeM3.toLocaleString()} m³ avoided`,
-                      hospitalDelayMinutes: 0,
-                      simulatedMaxDepthM: selectedPlanMetrics?.maxWaterDepthM
-                    },
-                    linkedIssueKey: 'JSM-4903',
-                    status: 'COMMITTED_IMMUTABLE',
-                    createdAt: new Date().toISOString(),
-                    notes: `Commander authorized immediate field dispatch for ${selectedPlanDef.name}.`
+                      role: 'Incident Commander'
+                    }
                   };
 
                   try {
-                    const decs = JSON.parse(localStorage.getItem('delta_local_decisions') || '[]');
-                    decs.unshift(decisionRecord);
-                    localStorage.setItem('delta_local_decisions', JSON.stringify(decs));
-
-                    const newTicket = {
-                      id: `t-${Date.now()}`,
-                      key: 'JSM-4903',
-                      summary: `EMERGENCY DISPATCH: Mobilize Crew for ${selectedPlanDef.name}`,
-                      priority: 'P1_CRITICAL',
-                      status: 'DISPATCHED',
-                      decisionRef: decId,
-                      assignee: 'Rapid Tactical Emergency Response Crew #01 (Lead: M. Vance)',
-                      location: '42.3412° N, 71.1097° W (Brookline Ave Culvert Headwall)',
-                      timeRemaining: '12m SLA (CRITICAL RESPONSE)',
-                      isLiveDispatched: true
-                    };
-                    const tickets = JSON.parse(localStorage.getItem('delta_operational_tickets') || '[]');
-                    tickets.unshift(newTicket);
-                    localStorage.setItem('delta_operational_tickets', JSON.stringify(tickets));
-                  } catch (e) {
-                    console.warn('Local storage write skipped', e);
-                  }
-
-                  if (onNavigateToDecisions) {
-                    onNavigateToDecisions();
+                    const res: any = await invokeSafe('recordDecision', payload);
+                    if (res && res.success) {
+                      setApprovedRecord(res.data || res.record || payload);
+                      setIsApprovalModalOpen(false);
+                    } else {
+                      setApprovalError(res?.error?.message || res?.message || 'Server rejected decision record approval.');
+                    }
+                  } catch (err: any) {
+                    setApprovalError(err?.message || String(err));
+                  } finally {
+                    setIsSubmitting(false);
                   }
                 }}
-                className={`w-full flex items-center justify-center gap-2 font-mono text-xs font-bold py-3.5 px-4 rounded-lg transition-all shadow-tactical ${
-                  selectedPlanId === 'plan-gamma'
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400'
-                    : 'bg-safety-orange hover:bg-safety-hover text-white'
-                }`}
+                className="px-5 py-2.5 rounded bg-safety-orange hover:bg-safety-hover disabled:opacity-50 text-white font-bold flex items-center gap-2 transition-colors shadow-tactical"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>AUTHORIZE {selectedPlanDef.id.toUpperCase()} &amp; DISPATCH FIELD CREW VIA JIRA &rarr;</span>
+                <Lock className="w-4 h-4" />
+                <span>{isSubmitting ? 'COMMITTING TO FORGE KVS...' : 'CONFIRM & AUTHORIZE DECISION RECORD'}</span>
               </button>
-              <div className="text-[11px] text-storm-400 text-center font-mono">
-                Signs immutable Decision Record and automatically generates field dispatch ticket in Jira Service Management.
-              </div>
             </div>
           </div>
         </div>

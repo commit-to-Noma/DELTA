@@ -270,8 +270,19 @@ resolver.define('saveInterventionsEvaluation', async (req) => await saveInterven
 
 // Decision Record KVS operations (Custom UI Bridge)
 resolver.define('recordDecision', async (req) => {
-  const payload = req?.payload || req;
-  return await recordDecision(payload, null, req?.context);
+  try {
+    const payload = req?.payload || req;
+    return await recordDecision(payload, null, req?.context);
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        code: err.code || 'RECORD_DECISION_FAILED',
+        message: err.message,
+        details: err.details
+      }
+    };
+  }
 });
 
 resolver.define('getDecision', async (req) => {

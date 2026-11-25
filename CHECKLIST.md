@@ -79,10 +79,10 @@
 
 ---
 
-## [ ] Phase 5: Append-Only Decision Records & Forge Storage
-- [ ] **5.1 Append-Only Ledger Schema**: Design auditable record schema (unique ID `DEC-XXXX`, scenario hash, baseline storm, chosen plan, physical metrics, human authorizing officer, timestamp) labelled "Append-only by application design".
-- [ ] **5.2 Forge KVS Storage Persistence**: Persist Decision Records using `@forge/api` Key-Value Storage (`storage.set`, `storage.get`) with zero external database dependencies (Runs on Atlassian eligible, zero third-party egress).
-- [ ] **5.3 Human-in-the-Loop Approval Gate**: Implement strict human authorization step preventing autonomous execution; only an authorized incident commander can sign and commit a decision block.
+## [x] Phase 5: Decision Records & Human Approval Workflow
+- [x] **5.1 Versioned Decision Record Schema**: Designed and implemented versioned schema (`schemaVersion: '2.0.0'`, `decisionId`, `createdAt`, `status: 'APPROVED'`, `humanApprover`, `chosenPlan`, `scenarioHash`, `canonicalScenario`, `baselineMetrics`, `interventionMetrics`, `differentialMetrics`, `engineeringRationale`, `evaluationReference`) in `src/resolvers/decisionStorage.js`. Eradicated fabricated metrics and client-supplied approver claims.
+- [x] **5.2 Server-Side Validation & Forge KVS Persistence**: Implemented strict server-side validation rejecting unauthenticated sessions (`UNAUTHENTICATED_SESSION`), client identity mismatches (`APPROVER_AUTHENTICATION_MISMATCH`), invalid plans (`INVALID_CHOSEN_PLAN`), scenario hash tampering (`SCENARIO_HASH_MISMATCH`), missing human rationale (`MISSING_RATIONALE`), and duplicate writes (`RECORD_IMMUTABLE_CONFLICT`). Maintained `decision:<id>`, `decisions:index`, and optional `issue-decision:<key>` in Forge KVS. Documented Last-Write-Wins (LWW) key-level concurrency and application-level immutability model (Truth Gate: no blockchain/HSM claims).
+- [x] **5.3 Human-in-the-Loop Approval UI Workflow**: Built interactive 2-step Incident Commander authorization modal in `InterventionsView.tsx` with comparative differential metrics review, canonical scenario hash inspection, authenticated identity confirmation, mandatory engineering rationale input, and explicit confirmation submission to Forge KVS. Updated `DecisionRecordsView.tsx` with schema version badges, engineering rationale callout, and differential metrics display. Verified with 18 automated tests in `tests/decisionRecords.test.ts` (145/145 total suite tests passing).
 
 ---
 

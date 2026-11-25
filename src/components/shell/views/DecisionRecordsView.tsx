@@ -12,7 +12,9 @@ import { invokeSafe as invoke } from '../../../services/forgeBridge';
 
 interface StoredDecisionRecord {
   decisionId: string;
+  schemaVersion?: string;
   scenarioHash?: string;
+  canonicalScenario?: any;
   baselineStorm?: string;
   chosenPlan?: {
     planId: string;
@@ -26,6 +28,15 @@ interface StoredDecisionRecord {
     authorizationPolicy?: string;
     approvalTimestamp?: string;
     verifiedAt?: string;
+  };
+  engineeringRationale?: string;
+  baselineMetrics?: any;
+  interventionMetrics?: any;
+  differentialMetrics?: {
+    avoidedSurfaceVolumeM3?: number;
+    maxDepthReductionM?: number;
+    protectedRoadsCount?: number;
+    protectedRoadNames?: string[];
   };
   physicalMetrics?: {
     inundationReduction?: string;
@@ -46,10 +57,15 @@ interface DecisionRecordDisplay {
   intervention: string;
   hash: string;
   deltaSummary: string;
+  avoidedVolume?: string;
+  peakDepthDelta?: string;
+  protectedCorridors?: string;
   jsmTicketId: string;
   status: string;
   isLiveKvs: boolean;
   notes?: string;
+  engineeringRationale?: string;
+  schemaVersion?: string;
 }
 
 interface DecisionRecordsViewProps {
@@ -68,19 +84,37 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
       // Call Forge backend resolver via @forge/bridge invoke
       const res: any = await invoke('listDecisions');
       if (res && res.success && Array.isArray(res.data)) {
-        const mapped: DecisionRecordDisplay[] = res.data.map((r: StoredDecisionRecord) => ({
-          id: r.decisionId,
-          code: r.decisionId,
-          timestamp: r.createdAt || r.humanApprover?.approvalTimestamp || new Date().toISOString(),
-          author: `${r.humanApprover?.displayName || 'Unknown Approver'} [${r.humanApprover?.role || 'Incident Commander'}]`,
-          intervention: r.chosenPlan?.name || 'Authorized Flood Mitigation Plan',
-          hash: r.scenarioHash || 'sha256:unspecified',
-          deltaSummary: `Status: ${r.status || 'COMMITTED_IMMUTABLE'}`,
-          jsmTicketId: r.linkedIssueKey || 'NONE (NO OPERATIONAL DISPATCH)',
-          status: r.status || 'COMMITTED_IMMUTABLE',
-          isLiveKvs: true,
-          notes: r.notes
-        }));
+        const mapped: DecisionRecordDisplay[] = res.data.map((r: StoredDecisionRecord) => {
+          const rationale = r.engineeringRationale || r.notes || r.chosenPlan?.tradeOffSummary || 'Incident Commander authorized hydraulic mitigation.';
+          const avoidedVol = r.differentialMetrics?.avoidedSurfaceVolumeM3 !== undefined
+            ? `+${r.differentialMetrics.avoidedSurfaceVolumeM3.toLocaleString()} m³`
+            : r.physicalMetrics?.inundationReduction;
+          const depthDelta = r.differentialMetrics?.maxDepthReductionM !== undefined
+            ? `-${r.differentialMetrics.maxDepthReductionM.toFixed(3)} m`
+            : undefined;
+          const corridors = r.differentialMetrics?.protectedRoadNames && r.differentialMetrics.protectedRoadNames.length > 0
+            ? r.differentialMetrics.protectedRoadNames.join(', ')
+            : undefined;
+
+          return {
+            id: r.decisionId,
+            code: r.decisionId,
+            timestamp: r.createdAt || r.humanApprover?.approvalTimestamp || new Date().toISOString(),
+            author: `${r.humanApprover?.displayName || 'Unknown Approver'} [${r.humanApprover?.role || 'Incident Commander'}]`,
+            intervention: r.chosenPlan?.name || 'Authorized Flood Mitigation Plan',
+            hash: r.scenarioHash || 'sha256:unspecified',
+            deltaSummary: avoidedVol ? `${avoidedVol} avoided` : `Status: ${r.status || 'APPROVED'}`,
+            avoidedVolume: avoidedVol,
+            peakDepthDelta: depthDelta,
+            protectedCorridors: corridors,
+            jsmTicketId: r.linkedIssueKey || 'NONE (NO OPERATIONAL DISPATCH)',
+            status: r.status || 'APPROVED',
+            isLiveKvs: true,
+            notes: r.notes,
+            engineeringRationale: rationale,
+            schemaVersion: r.schemaVersion || '1.0.0'
+          };
+        });
         setKvsRecords(mapped);
       }
     } catch (err: any) {
@@ -106,6 +140,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
         name: 'Plan Alpha: Rapid Deployable Barrier along Francis St Ambulance Route [BENCHMARK ONLY]',
         tradeOffSummary: 'Phase 0.7.2 Benchmark test intervention for live KVS persistence verification. NOT FOR OPERATIONAL ACTION.'
       },
+      engineeringRationale: 'Phase 0.7.2 Benchmark test intervention for live KVS persistence verification. NOT FOR OPERATIONAL ACTION.',
       humanApprover: {
         displayName: 'Nomathemba Ncube',
         role: 'Incident Commander',
@@ -150,12 +185,18 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
       <div className="bg-onyx-900 border-l-4 border-emerald-500 p-4 rounded-r border-y border-r border-onyx-800 flex items-start gap-3">
         <Lock className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
         <div className="text-xs font-mono text-storm-300 space-y-1">
-          <div className="font-bold text-storm-100 uppercase tracking-wider">
-            APPEND-ONLY IMMUTABLE AUDIT LEDGER (FORGE KVS PERSISTENCE)
+          <div className="font-bold text-storm-100 uppercase tracking-wider flex items-center gap-2">
+            <span>APPEND-ONLY AUDIT LEDGER (FORGE KVS PERSISTENCE)</span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700">
+              PHASE 5 OPERATIONAL
+            </span>
           </div>
           <p className="text-storm-300 font-sans">
-            Every operational decision authorized in DELTA is signed and stored as an immutable audit record in Forge App Storage (KVS). Responders and municipal auditors have cryptographic proof of the simulation parameters, physical justification, and authorizing Incident Commander.
+            Every operational decision authorized in DELTA is recorded in an application-level audit ledger persisted to Forge App Storage (KVS). Responders and municipal oversight officers have verifiable provenance of the canonical scenario inputs, evaluated hydraulic differential metrics, engineering rationale, and authorizing Incident Commander identity.
           </p>
+          <div className="text-[10px] text-storm-500 font-mono pt-1">
+            * Concurrency model: Last-Write-Wins (LWW) at key level. Application-level check prevents duplicate ID overwrite. Not a cryptographic blockchain or hardware HSM.
+          </div>
         </div>
       </div>
 
@@ -249,6 +290,11 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                     <span className="px-2 py-0.5 rounded bg-onyx-800 border border-onyx-700 text-storm-300 text-[9px] uppercase font-bold">
                       LIVE FORGE KVS
                     </span>
+                    {rec.schemaVersion && (
+                      <span className="px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800 text-purple-300 text-[9px] font-mono">
+                        v{rec.schemaVersion}
+                      </span>
+                    )}
                   </div>
                   <div className="text-storm-400 text-[11px]">{rec.timestamp}</div>
                 </div>
@@ -257,21 +303,30 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                   {rec.intervention}
                 </div>
 
-                {rec.notes && (
-                  <div className="bg-onyx-950 p-2 rounded border border-onyx-800 text-[11px] text-storm-300 font-mono">
-                    {rec.notes}
+                {/* Human Engineering Rationale Callout */}
+                {rec.engineeringRationale && (
+                  <div className="bg-onyx-950 p-3 rounded border border-onyx-800 text-xs text-storm-200 font-sans space-y-1">
+                    <div className="text-[10px] font-mono font-bold text-safety-orange uppercase tracking-wider">
+                      HUMAN ENGINEERING RATIONALE:
+                    </div>
+                    <p className="leading-relaxed italic">
+                      "{rec.engineeringRationale}"
+                    </p>
                   </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-[11px] text-storm-300">
                   <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                    <span className="text-storm-500 block text-[9px] uppercase">AUTHORIZING OFFICER</span>
+                    <span className="text-storm-500 block text-[9px] uppercase">AUTHORIZING INCIDENT COMMANDER</span>
                     <span className="text-storm-200">{rec.author}</span>
                   </div>
 
                   <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                    <span className="text-storm-500 block text-[9px] uppercase">HYDRAULIC DELTA</span>
-                    <span className="text-storm-200 font-bold">{rec.deltaSummary}</span>
+                    <span className="text-storm-500 block text-[9px] uppercase">HYDRAULIC DIFFERENTIAL</span>
+                    <span className="text-emerald-400 font-bold">{rec.deltaSummary}</span>
+                    {rec.peakDepthDelta && (
+                      <span className="text-storm-400 block text-[10px]">Peak depth: {rec.peakDepthDelta}</span>
+                    )}
                   </div>
 
                   <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
@@ -282,8 +337,14 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                   </div>
                 </div>
 
+                {rec.protectedCorridors && (
+                  <div className="text-[11px] text-storm-400 pt-1">
+                    <span className="text-storm-500">Restored Corridors:</span> <span className="text-storm-200">{rec.protectedCorridors}</span>
+                  </div>
+                )}
+
                 <div className="text-[10px] text-storm-500 truncate pt-1">
-                  HASH: {rec.hash}
+                  CANONICAL HASH: <code className="text-purple-300 font-mono">{rec.hash}</code>
                 </div>
               </div>
             ))
