@@ -779,7 +779,11 @@ export const FloodSimulationView: React.FC = () => {
                                     : 'bg-red-950 text-red-300 border border-red-800'
                                 }`}
                               >
-                                {route.status}
+                                {route.status === 'PASSABLE'
+                                  ? 'DEPTH < 15cm'
+                                  : route.status === 'CAUTION'
+                                  ? 'DEPTH 15-30cm'
+                                  : 'DEPTH ≥ 30cm'}
                               </span>
                             </div>
                           </div>
@@ -801,15 +805,19 @@ export const FloodSimulationView: React.FC = () => {
                         <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" />
                         <span>
                           {activeInspection.hospitalExposure.overallStatus === 'ACCESS_COMPROMISED_ISOLATED'
-                            ? 'EMERGENCY INGRESS COMPROMISED'
+                            ? 'SCREENING ALERT: ARTERY INUNDATION (≥30cm) DETECTED'
                             : activeInspection.hospitalExposure.overallStatus === 'CAUTION_ACCESS_RESTRICTED'
-                            ? 'PERIMETER PONDING CAUTION'
-                            : 'FULLY ACCESSIBLE TO TRANSIT'}
+                            ? 'SCREENING ADVISORY: PERIMETER / ARTERY PONDING (15–30cm)'
+                            : 'SCREENING STATUS: ALL ARTERIES < 15cm (Operational Transit Unverified)'}
                         </span>
                       </div>
                       <p className="text-[10px] font-sans text-storm-300">
                         {activeInspection.hospitalExposure.summaryText}
                       </p>
+                    </div>
+
+                    <div className="text-[8.5px] text-storm-500 font-sans italic px-1">
+                      * Simulated depths are 25m grid averages. Low depth indicates modeled water levels, not certified vehicular accessibility.
                     </div>
                   </div>
                 )}
@@ -861,26 +869,30 @@ export const FloodSimulationView: React.FC = () => {
                     {/* Segment Discretization Breakdown */}
                     <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1 text-[10px]">
                       <span className="text-storm-400 uppercase font-bold block">
-                        SEGMENT PASSABILITY BREAKDOWN
+                        SEGMENT SCREENING BREAKDOWN (Depth Tiers)
                       </span>
                       <div className="flex justify-between">
-                        <span className="text-emerald-400">Passable (&lt;15cm):</span>
+                        <span className="text-emerald-400">&lt;15cm (Low Depth):</span>
                         <span className="text-storm-200 font-bold">
                           {activeInspection.roadCorridor.passableCellsCount} / {activeInspection.roadCorridor.totalCellsCount}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-amber-400">Caution (15-30cm):</span>
+                        <span className="text-amber-400">15–30cm (Moderate Ponding):</span>
                         <span className="text-storm-200 font-bold">
                           {activeInspection.roadCorridor.cautionCellsCount} / {activeInspection.roadCorridor.totalCellsCount}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-red-400">Impassable (≥30cm):</span>
+                        <span className="text-red-400">≥30cm (Substantial Inundation):</span>
                         <span className="text-storm-200 font-bold">
                           {activeInspection.roadCorridor.impassableCellsCount} / {activeInspection.roadCorridor.totalCellsCount}
                         </span>
                       </div>
+                    </div>
+
+                    <div className="text-[8.5px] text-storm-500 font-sans italic px-1">
+                      * Screening classification based on 25m simulated depth. Real-world emergency vehicular access depends on road geometry, debris, velocity, and fleet clearance.
                     </div>
 
                     {activeInspection.roadCorridor.connectedHospitals.length > 0 && (
@@ -929,14 +941,18 @@ export const FloodSimulationView: React.FC = () => {
                     </div>
 
                     {/* Engineering Provenance & Limitations Disclosure */}
-                    <div className="bg-onyx-900/60 p-2 rounded border border-onyx-800/80 text-[9px] text-storm-400 space-y-1 font-sans">
+                    <div className="bg-onyx-900/60 p-2.5 rounded border border-onyx-800/80 text-[9px] text-storm-400 space-y-1.5 font-sans">
                       <div className="font-bold text-amber-400 font-mono text-[9.5px]">
                         ENGINEERING PROVENANCE &amp; SCREENING DISCLOSURE
                       </div>
                       <p>
-                        USACE Phase 1 replaced twin 72&quot; pipes with a 10&apos; × 24&apos; concrete box culvert.
-                        In this 25m planning model, it is abstracted as an exploratory lumped sink (12.5 m³/s nominal capacity).
-                        Detailed invert survey elevations and dynamic pipe backwater routing require certified 1D/2D engineering models.
+                        USACE Muddy River Phase 1 installed a 10&apos; × 24&apos; (3.05m × 7.32m) concrete box culvert beneath Brookline Avenue.
+                      </p>
+                      <p>
+                        In this production build, CULVERT-01-BROOKLINE is modeled as an unrouted point drainage sink at cell [17, 26] on the elevated road deck (7.51m NAVD88), approximately 6.9m above the adjacent channel bed (0.31–0.61m). Drainage removes water from domain storage rather than routing it through a coupled conduit into the downstream Charles River basin.
+                      </p>
+                      <p>
+                        The 12.5 m³/s nominal capacity represents an unsubmerged weir screening heuristic at 1.0m head (Q = 1.70·W·H¹˙⁵), not a verified barrel conveyance rating. A coupled 1D/2D dynamic link (Option C) has been reviewed in documentation but is not implemented in this solver release.
                       </p>
                     </div>
                   </div>
@@ -956,12 +972,18 @@ export const FloodSimulationView: React.FC = () => {
                     <div>
                       <span className="font-bold block">
                         {activeInspection.deltaWaterDepthM > 0
-                          ? 'AVOIDED FLOODWATER (PLAN WIN)'
+                          ? 'AVOIDED FLOODWATER (DEPTH REDUCTION)'
                           : activeInspection.deltaWaterDepthM < 0
-                          ? 'DEFLECTED PONDING (BARRIER)'
+                          ? 'DEFLECTED PONDING (LOCAL INCREASE)'
                           : 'NEUTRAL STORAGE'}
                       </span>
-                      <span className="text-[10px] text-storm-400">Vs. unmitigated crisis baseline</span>
+                      <span className="text-[10px] text-storm-400">
+                        {activeInspection.deltaWaterDepthM > 0
+                          ? `-${(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm vs. unmitigated crisis baseline`
+                          : activeInspection.deltaWaterDepthM < 0
+                          ? `+${Math.abs(activeInspection.deltaWaterDepthM * 100).toFixed(1)} cm vs. unmitigated crisis baseline`
+                          : 'Identical depth vs. baseline'}
+                      </span>
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-bold">
@@ -1035,13 +1057,16 @@ export const FloodSimulationView: React.FC = () => {
                 >
                   <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" />
                   <span>
-                    STATUS:{' '}
+                    SCREENING STATUS:{' '}
                     {activeInspection.passabilityStatus === 'CRITICAL_IMPASSABLE'
-                      ? 'IMPASSABLE ROADWAY (>30cm)'
+                      ? 'WATER DEPTH ≥ 30cm (Substantial Inundation Screening Tier)'
                       : activeInspection.passabilityStatus === 'CAUTION_MINOR_PONDING'
-                      ? 'AMBULANCE CAUTION (10-30cm)'
-                      : 'CLEAR & FULLY PASSABLE (<10cm)'}
+                      ? 'WATER DEPTH 10–30cm (Moderate Ponding Screening Tier)'
+                      : 'WATER DEPTH < 10cm (Low Depth / Passable Screening Tier)'}
                   </span>
+                </div>
+                <div className="text-[8.5px] text-storm-500 font-sans italic px-1">
+                  * Screening model metric. Operational emergency vehicular accessibility requires on-site verification.
                 </div>
               </div>
             ) : (

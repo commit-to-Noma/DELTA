@@ -572,7 +572,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
                   <span className="text-[10px] text-storm-500 uppercase block font-bold">AVOIDED SURFACE WATER</span>
                   <div className="text-lg font-bold text-safety-orange flex items-center gap-1 mt-1">
                     <TrendingDown className="w-4 h-4" />
-                    <span>+{selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³</span>
+                    <span>{selectedDiff.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}{selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³</span>
                   </div>
                   <div className="text-[10px] text-storm-500 mt-1">
                     Surface storage reduction vs. unmitigated baseline
@@ -737,7 +737,10 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 text-[11px]">
                 <div>
                   <span className="text-storm-400 block">Avoided Volume:</span>
-                  <span className="text-emerald-400 font-bold">+{selectedDiff?.avoidedSurfaceVolumeM3.toLocaleString()} m³</span>
+                  <span className="text-emerald-400 font-bold">
+                    {(selectedDiff?.avoidedSurfaceVolumeM3 ?? 0) > 0 ? '+' : ''}
+                    {selectedDiff?.avoidedSurfaceVolumeM3?.toLocaleString()} m³
+                  </span>
                 </div>
                 <div>
                   <span className="text-storm-400 block">Peak Depth Delta:</span>

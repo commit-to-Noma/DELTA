@@ -21,6 +21,7 @@ import {
   createHydraulicState,
   stepHydraulics,
 } from '../src/simulation/hydraulicSolver';
+import { evaluateHospitalAccess } from '../src/simulation/disruptionEngine';
 
 describe('Task 1.4: Geographic Canvas & Hydraulic Integration', () => {
   const dataset = loadBostonCatchment();
@@ -285,6 +286,31 @@ describe('Task 1.4: Geographic Canvas & Hydraulic Integration', () => {
       const delta = baseDepth[testIdx] - planDepth[testIdx];
       expect(delta).toBeCloseTo(0.18, 5);
       expect(delta).toBeGreaterThan(0.02); // Triggers beneficial avoided water display
+    });
+
+    it('TEST-CANVAS-10: Validates Workstream 2A screening calibration and culvert point-sink provenance', () => {
+      // 1. Verify culvert CULVERT-01-BROOKLINE is at road deck cell [17, 26] with elevation ~7.51m
+      const brooklineCulvert = dataset.modelledDrainageInlets.find((d) => d.inletId === 'CULVERT-01-BROOKLINE');
+      expect(brooklineCulvert).toBeDefined();
+      const [cr, cc] = brooklineCulvert!.gridCell;
+      expect(cr).toBe(17);
+      expect(cc).toBe(26);
+
+      const roadDeckElev = dataset.elevationMatrix[cr][cc];
+      expect(roadDeckElev).toBeCloseTo(7.51, 1);
+
+      // Verify Muddy River channel invert nearby is 0.31m - 0.61m, proving the ~6.9m elevation drop to road deck
+      const streamBedElev = dataset.elevationMatrix[15][24];
+      expect(streamBedElev).toBeCloseTo(0.61, 2);
+      expect(roadDeckElev - streamBedElev).toBeCloseTo(6.90, 1);
+
+      // 2. Verify hospital access evaluation notes screening tier caveats
+      const { nx, ny } = dataset.metadata.grid;
+      const dryDepth = new Float64Array(nx * ny);
+      const accessEvals = evaluateHospitalAccess(dataset, dryDepth);
+      const bwhEval = accessEvals.find((a) => a.name.includes("Brigham and Women's"));
+      expect(bwhEval).toBeDefined();
+      expect(bwhEval!.accessStatusDescription).toContain('operational vehicular access unverified');
     });
   });
 });

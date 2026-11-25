@@ -217,14 +217,14 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         overallStatus = 'CAUTION_ACCESS_RESTRICTED';
       }
 
-      let summaryText = 'Facility ground floor structurally dry (elev ' + campusGroundElevationM.toFixed(1) + 'm). All primary access corridors clear.';
+      let summaryText = 'Campus ground structurally dry (elev ' + campusGroundElevationM.toFixed(1) + 'm). All screened ingress corridors below 15cm depth threshold (operational vehicular access unverified).';
       if (buildingStandingWaterDepthM >= 0.30) {
-        summaryText = `Direct structural flooding at facility (${(buildingStandingWaterDepthM * 100).toFixed(1)} cm). High risk.`;
+        summaryText = `Substantial direct flooding at facility coordinate (${(buildingStandingWaterDepthM * 100).toFixed(1)} cm). High screening risk.`;
       } else if (hasImpassable) {
         const blocked = accessRoutes.filter((a) => a.status === 'IMPASSABLE').map((a) => a.roadName).join(', ');
-        summaryText = `Facility building structurally dry (${(buildingStandingWaterDepthM * 100).toFixed(1)} cm water, elev ${campusGroundElevationM.toFixed(1)}m). Access artery impassable (>30 cm): ${blocked}.`;
+        summaryText = `Campus ground structurally dry (${(buildingStandingWaterDepthM * 100).toFixed(1)} cm water, elev ${campusGroundElevationM.toFixed(1)}m). Screened access corridor exceeds 30cm depth threshold: ${blocked}. Rerouting indicated (real-world transit unverified).`;
       } else if (hasCaution) {
-        summaryText = `Facility building dry. Minor perimeter ponding (15-30 cm) on ingress routes. Ambulance caution.`;
+        summaryText = `Campus ground structurally dry; minor ponding on screened ingress corridors (15-30 cm). Operational screening caution.`;
       }
 
       return {
@@ -644,7 +644,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
             ctx.strokeStyle = 'rgba(239, 68, 68, 0.95)'; // Red-500
             ctx.lineWidth = 2.8;
           } else if (segDepth >= 0.15) {
-            // Ambulance Caution ponding
+            // Moderate ponding screening tier (15-30cm)
             ctx.strokeStyle = 'rgba(245, 158, 11, 0.90)'; // Amber-500
             ctx.lineWidth = 2.2;
           } else {
@@ -841,8 +841,8 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
 
     // 11. Docked On-Canvas Tactical Legend (if activeLayers.legend !== false)
     if (activeLayers.legend !== false) {
-      const legW = 175;
-      const legH = viewMode === 'delta' ? 120 : 155;
+      const legW = 185;
+      const legH = viewMode === 'delta' ? 125 : 165;
       const legX = originX + displaySize - legW - 10;
       const legY = originY + displaySize - legH - 10;
 
@@ -856,7 +856,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       // Legend Header
       ctx.font = 'bold 9px monospace';
       ctx.fillStyle = '#f97316';
-      ctx.fillText(viewMode === 'delta' ? 'DELTA: AVOIDED FLOOD' : 'TACTICAL DEPTH BANDS', legX + 8, legY + 14);
+      ctx.fillText(viewMode === 'delta' ? 'DELTA: AVOIDED FLOOD' : 'DELTA SCREENING DEPTHS', legX + 8, legY + 14);
 
       ctx.font = '8.5px monospace';
       if (viewMode === 'delta') {
@@ -883,34 +883,41 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         // Standard Depth Bands
         let currY = legY + 28;
         const bands = [
-          { color: 'rgba(220, 38, 38, 0.95)', label: '≥ 60cm (Severe Danger)' },
-          { color: 'rgba(249, 115, 22, 0.88)', label: '30–60cm (Impassable)' },
-          { color: 'rgba(37, 99, 235, 0.82)', label: '15–30cm (Caution)' },
-          { color: 'rgba(56, 189, 248, 0.65)', label: '5–15cm (Shallow)' },
-          { color: 'rgba(14, 165, 233, 0.30)', label: '< 5cm (Runoff Sheen)' },
+          { color: 'rgba(220, 38, 38, 0.95)', label: '≥ 60cm: Deep Inundation' },
+          { color: 'rgba(249, 115, 22, 0.88)', label: '30–60cm: Substantial Inundation' },
+          { color: 'rgba(37, 99, 235, 0.82)', label: '15–30cm: Moderate Ponding' },
+          { color: 'rgba(56, 189, 248, 0.65)', label: '5–15cm: Shallow Surface Water' },
+          { color: 'rgba(14, 165, 233, 0.30)', label: '< 5cm: Surface Wetting / Sheen' },
         ];
         for (const b of bands) {
           ctx.fillStyle = b.color;
           ctx.fillRect(legX + 8, currY - 6, 10, 8);
           ctx.fillStyle = '#e2e8f0';
           ctx.fillText(b.label, legX + 24, currY);
-          currY += 15;
+          currY += 14;
         }
 
         // Road indicators
-        currY += 4;
-        ctx.fillStyle = '#f8fafc';
-        ctx.fillText('ROADS: ', legX + 8, currY);
+        currY += 3;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '8px monospace';
+        ctx.fillText('ROADS (Screening Tiers):', legX + 8, currY);
+        currY += 11;
         ctx.fillStyle = '#22c55e';
-        ctx.fillText('■<15cm ', legX + 50, currY);
+        ctx.fillText('■<15cm', legX + 8, currY);
         ctx.fillStyle = '#f59e0b';
-        ctx.fillText('■15-30 ', legX + 92, currY);
+        ctx.fillText('■15-30cm', legX + 62, currY);
         ctx.fillStyle = '#ef4444';
-        ctx.fillText('■>30cm', legX + 132, currY);
+        ctx.fillText('■≥30cm', legX + 125, currY);
 
         currY += 13;
         ctx.fillStyle = '#38bdf8';
-        ctx.fillText('✚ Hospital: Dry Campus / Monitored', legX + 8, currY);
+        ctx.fillText('✚ Hospital: Campus Monitored', legX + 8, currY);
+
+        currY += 11;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '7px monospace';
+        ctx.fillText('* Model screening tiers. Field access unverified.', legX + 8, currY);
       }
     }
   }, [

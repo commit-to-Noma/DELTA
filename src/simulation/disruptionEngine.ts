@@ -217,14 +217,14 @@ export function evaluateHospitalAccess(
     }
 
     // Descriptive engineering note
-    let accessStatusDescription = 'Facility building dry and structurally accessible across all primary corridors.';
+    let accessStatusDescription = 'Campus ground structurally dry (elev ' + campusElev.toFixed(1) + 'm). All screened ingress corridors below 15cm depth threshold (operational vehicular access unverified).';
     if (depthM >= 0.30) {
-      accessStatusDescription = `Severe direct flooding at facility coordinate (${(depthM * 100).toFixed(1)} cm). Structural hazard.`;
+      accessStatusDescription = `Severe direct flooding at facility coordinate (${(depthM * 100).toFixed(1)} cm). High screening risk.`;
     } else if (hasImpassableRoute) {
       const blockedRoads = accessRoutesStatus.filter((r) => r.status === 'IMPASSABLE').map((r) => r.roadName).join(', ');
-      accessStatusDescription = `Campus building structurally dry (${(depthM * 100).toFixed(1)} cm water, elev ${campusElev.toFixed(1)}m). Access artery impassable (>30 cm): ${blockedRoads}.`;
+      accessStatusDescription = `Campus ground structurally dry (${(depthM * 100).toFixed(1)} cm water, elev ${campusElev.toFixed(1)}m). Screened access corridor exceeds 30cm depth threshold: ${blockedRoads}. Rerouting indicated (real-world transit unverified).`;
     } else if (hasCautionRoute) {
-      accessStatusDescription = `Campus building structurally dry; minor ponding on ingress corridors (15-30 cm). Ambulance caution.`;
+      accessStatusDescription = `Campus ground structurally dry; minor ponding on screened ingress corridors (15-30 cm). Operational screening caution.`;
     }
 
     return {
