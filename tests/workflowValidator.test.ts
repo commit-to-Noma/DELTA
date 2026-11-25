@@ -24,6 +24,7 @@ describe('Jira Workflow Validator Gate Suite', () => {
       name: 'Plan Beta: Clear Brookline Culvert'
     },
     humanApprover: {
+      accountId: 'qm:commander-ramos',
       displayName: 'Battalion Chief M. Ramos',
       role: 'Incident Commander',
       approvalTimestamp: '2026-11-25T08:30:00.000Z'

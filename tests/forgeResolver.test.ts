@@ -33,6 +33,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
       tradeOffSummary: 'Prevents backwater surge along Brookline Ave and Francis St by restoring culvert conveyance to 12.5 m³/s.'
     },
     humanApprover: {
+      accountId: 'qm:commander-vance',
       displayName: 'Captain J. Vance',
       role: 'Incident Commander',
       approvalTimestamp: '2026-11-25T08:00:00.000Z'

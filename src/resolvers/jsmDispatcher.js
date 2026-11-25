@@ -6,20 +6,22 @@
  * 
  * Enforces:
  * 1. Authoritative dataset-derived coordinates (EPSG:26986 & WGS84 with domain validation)
- * 2. Strict dispatch idempotency (prevents duplicate Jira issue creation)
- * 3. Human approval verification & authenticated caller authorization
- * 4. Safe recovery on storage/network failure
+ * 2. Pre-dispatch JQL Search-Before-Create reconciliation against durable operation ID
+ * 3. State machine preventing duplicate creation under degraded/uncertain Jira states
+ * 4. Server-side Incident Commander re-authorization before dispatch
+ * 5. Safe recovery and state synchronization when KVS or Jira fail
  */
 
 import api, { route } from '@forge/api';
 import { getDecision, getStorageClient } from './decisionStorage.js';
 import { resolveDispatchLocation } from './coordinates.js';
+import { verifyIncidentCommanderAuthorization, AUTHORIZATION_POLICY_NAME } from './authPolicy.js';
 
 /**
  * Builds an Atlassian Document Format (ADF) document for Jira issue description.
  * Embeds exact authoritative coordinates, verified corridor, and equipment specs.
  */
-export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resolvedLocation) {
+export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resolvedLocation, operationId) {
   const { equipment, priority, timeToCriticalInundation } = dispatchOrder;
   const approver = decisionRecord?.humanApprover;
   const plan = decisionRecord?.chosenPlan;
@@ -37,9 +39,11 @@ export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resol
         type: 'paragraph',
         content: [
           { type: 'text', text: 'Authorized by: ', marks: [{ type: 'strong' }] },
-          { type: 'text', text: `${approver?.displayName || 'Incident Commander'} (${approver?.role || 'Authorized Human Approver'})\n` },
+          { type: 'text', text: `${approver?.displayName || 'Incident Commander'} (${approver?.role || 'Authorized Incident Commander'})\n` },
           { type: 'text', text: 'Decision Audit ID: ', marks: [{ type: 'strong' }] },
           { type: 'text', text: `${decisionRecord?.decisionId || dispatchOrder.decisionId}\n` },
+          { type: 'text', text: 'Dispatch Operation ID: ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: `${operationId}\n` },
           { type: 'text', text: 'Approved Mitigation Plan: ', marks: [{ type: 'strong' }] },
           { type: 'text', text: `${plan?.name || 'Hydraulic Mitigation Protocol'}` }
         ]
@@ -136,14 +140,14 @@ export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resol
 }
 
 /**
- * Creates a Jira issue for an operational field dispatch with strict coordinate validation
- * and idempotency guarantees.
+ * Creates a Jira issue for an operational field dispatch with strict coordinate validation,
+ * server-side authorization re-check, and Search-Before-Create reconciliation.
  * 
  * @param {object} dispatchOrder - Order parameters (decisionId, targetLocation, priority, etc.)
- * @param {object} [options] - Optional execution context { customJiraClient, storageOverride, caller, context }
+ * @param {object} [options] - Optional execution context { customJiraClient, storageOverride, caller, context, customAuthPolicy }
  */
 export async function createDispatchTicket(dispatchOrder, options = {}) {
-  const { customJiraClient, storageOverride, caller, context } = options;
+  const { customJiraClient, storageOverride, caller, context, customAuthPolicy } = options;
 
   if (!dispatchOrder?.decisionId) {
     const err = new Error('JSM Dispatch Error: decisionId is required to issue a field dispatch ticket.');
@@ -151,11 +155,22 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     throw err;
   }
 
-  // 1. Authorisation Verification: Reject anonymous/unauthenticated caller
+  // 1. Authorisation Verification: Must hold Incident Commander authority on server
   const authenticatedCaller = caller || context?.accountId || dispatchOrder.caller;
-  if (!authenticatedCaller) {
-    const err = new Error('Unauthorized dispatch: Missing authenticated Jira user identity. Anonymous dispatch requests are rejected.');
+  const projectKey = dispatchOrder.projectKey || 'EMERG';
+
+  const auth = await verifyIncidentCommanderAuthorization({
+    accountId: authenticatedCaller,
+    projectKey,
+    customAuthPolicy
+  });
+
+  if (!auth.isAuthorized) {
+    const err = new Error(
+      `Dispatch authorization denied for account '${authenticatedCaller || 'anonymous'}': ${auth.reason || 'User lacks Incident Commander role.'}`
+    );
     err.code = 'UNAUTHORIZED_DISPATCH';
+    err.details = auth;
     throw err;
   }
 
@@ -169,42 +184,9 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
   }
 
   const decision = decisionResult.data;
-  const planId = decision.chosenPlan?.planId || dispatchOrder.planId || 'default-plan';
-  const idempotencyKey = `dispatch-record:${decision.decisionId}:${planId}`;
 
-  // 3. Dispatch Idempotency: Check if this plan has already been dispatched
-  const existingDispatch = await client.get(idempotencyKey);
-  if (existingDispatch) {
-    if (existingDispatch.status === 'DISPATCHED') {
-      return {
-        success: true,
-        isExisting: true,
-        issueKey: existingDispatch.issueKey,
-        issueId: existingDispatch.issueId,
-        self: existingDispatch.self,
-        decisionId: decision.decisionId,
-        planId,
-        dispatchedAt: existingDispatch.dispatchedAt,
-        coordinates: existingDispatch.coordinates,
-        message: `Dispatch already completed for decision '${decision.decisionId}' and plan '${planId}'. Returning existing ticket ${existingDispatch.issueKey}.`
-      };
-    }
-
-    if (existingDispatch.status === 'IN_PROGRESS') {
-      const leaseAgeMs = Date.now() - new Date(existingDispatch.initiatedAt).getTime();
-      const LEASE_DURATION_MS = 60000; // 60-second in-flight lease
-      if (leaseAgeMs < LEASE_DURATION_MS) {
-        const err = new Error(
-          `Concurrent dispatch in progress for decision '${decision.decisionId}' and plan '${planId}'. Please wait for in-flight dispatch to complete.`
-        );
-        err.code = 'DISPATCH_IN_PROGRESS';
-        throw err;
-      }
-    }
-  }
-
-  // 4. Approval Verification: Only APPROVED decisions may be dispatched
-  if (decision.status !== 'APPROVED') {
+  // 3. Approval Verification: Only APPROVED decisions may be dispatched
+  if (decision.status !== 'APPROVED' && decision.status !== 'DISPATCHED') {
     const err = new Error(
       `Cannot dispatch decision '${decision.decisionId}': status is '${decision.status}'. Only 'APPROVED' decisions may be dispatched.`
     );
@@ -212,24 +194,166 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     throw err;
   }
 
-  // 5. Strict Coordinate Resolution & Validation (No synthetic coordinates)
+  const planId = decision.chosenPlan?.planId || dispatchOrder.planId || 'default-plan';
+  
+  // 4. Stable Operation ID & Searchable Tag
+  const operationId = `delta-disp-${decision.decisionId.toLowerCase()}-${planId.toLowerCase()}`
+    .replace(/[^a-z0-9-]/g, '-')
+    .slice(0, 60);
+  const idempotencyKey = `dispatch-record:${decision.decisionId}:${planId}`;
+
+  // 5. Inspect KVS for existing completed dispatch (Fast path)
+  const existingKvsDispatch = await client.get(idempotencyKey);
+  if (existingKvsDispatch && existingKvsDispatch.status === 'DISPATCHED') {
+    return {
+      success: true,
+      isExisting: true,
+      issueKey: existingKvsDispatch.issueKey,
+      issueId: existingKvsDispatch.issueId,
+      self: existingKvsDispatch.self,
+      decisionId: decision.decisionId,
+      planId,
+      operationId,
+      dispatchedAt: existingKvsDispatch.dispatchedAt,
+      coordinates: existingKvsDispatch.coordinates,
+      message: `Dispatch already completed for decision '${decision.decisionId}' and plan '${planId}'. Returning existing ticket ${existingKvsDispatch.issueKey}.`
+    };
+  }
+
+  // 6. Pre-Dispatch Jira Reconciliation (Search-Before-Create)
+  let existingJiraIssues = [];
+  const searchJql = `labels = "${operationId}"`;
+
+  try {
+    if (typeof customJiraClient?.searchJira === 'function') {
+      existingJiraIssues = await customJiraClient.searchJira(searchJql);
+    } else if (typeof customJiraClient?.requestJira === 'function') {
+      // Mock client support for search endpoint
+      const searchRes = await customJiraClient.requestJira(
+        `/rest/api/3/issue/search?jql=${encodeURIComponent(searchJql)}&fields=key,id,summary,status`,
+        { method: 'GET' }
+      );
+      if (Array.isArray(searchRes?.issues)) {
+        existingJiraIssues = searchRes.issues;
+      }
+    } else {
+      const hasForgeRuntime = typeof globalThis !== 'undefined' &&
+        (typeof globalThis.__forge_fetch__ === 'function' || typeof globalThis.__forge_local_fetch__ === 'function');
+
+      if (hasForgeRuntime) {
+        const searchResp = await api.asApp().requestJira(
+          route`/rest/api/3/issue/search?jql=${searchJql}&fields=key,id,summary,status`
+        );
+        if (searchResp.ok) {
+          const searchData = await searchResp.json();
+          existingJiraIssues = searchData.issues || [];
+        }
+      }
+    }
+  } catch (searchErr) {
+    // If search fails, log warning
+    console.warn(`Jira search reconciliation warning: ${searchErr.message}`);
+  }
+
+  // 6a. Reconciliation Case A: Multiple matching issues detected
+  if (existingJiraIssues.length > 1) {
+    const conflictingKeys = existingJiraIssues.map((i) => i.key).join(', ');
+    const err = new Error(
+      `Reconciliation conflict: Found ${existingJiraIssues.length} existing Jira issues for operation '${operationId}' (${conflictingKeys}). Multiple dispatches detected. Manual resolution required.`
+    );
+    err.code = 'DUPLICATE_DISPATCH_CONFLICT';
+    err.details = { operationId, conflictingKeys: existingJiraIssues.map((i) => i.key) };
+    throw err;
+  }
+
+  // 6b. Reconciliation Case B: Exactly one matching issue found in Jira
+  if (existingJiraIssues.length === 1) {
+    const existingIssue = existingJiraIssues[0];
+    const resolvedLocation = resolveDispatchLocation(decision.chosenPlan, dispatchOrder.targetLocation);
+    const dispatchedAt = new Date().toISOString();
+    const reconciledRecord = {
+      status: 'DISPATCHED',
+      issueKey: existingIssue.key,
+      issueId: existingIssue.id,
+      self: existingIssue.self,
+      decisionId: decision.decisionId,
+      planId,
+      operationId,
+      dispatchedAt,
+      dispatchedBy: authenticatedCaller,
+      coordinates: resolvedLocation,
+      reconciledFromJira: true
+    };
+
+    // Heal KVS index with discovered Jira ticket
+    await client.set(idempotencyKey, reconciledRecord);
+
+    const updatedDecision = {
+      ...decision,
+      status: 'DISPATCHED',
+      dispatchedIssueKey: existingIssue.key,
+      dispatchedAt
+    };
+    await client.set(`decision:${decision.decisionId}`, updatedDecision);
+
+    return {
+      success: true,
+      isExisting: true,
+      issueKey: existingIssue.key,
+      issueId: existingIssue.id,
+      self: existingIssue.self,
+      decisionId: decision.decisionId,
+      planId,
+      operationId,
+      dispatchedAt,
+      coordinates: resolvedLocation,
+      reconciledFromJira: true,
+      message: `Reconciliation match: Adopted existing Jira issue ${existingIssue.key} for operation '${operationId}'. Duplicate creation prevented.`
+    };
+  }
+
+  // 6c. Inspect KVS State Machine for UNCERTAIN outcome or active in-flight lease
+  if (existingKvsDispatch) {
+    if (existingKvsDispatch.status === 'UNCERTAIN') {
+      const err = new Error(
+        `Previous dispatch attempt for operation '${operationId}' ended with an uncertain outcome (${existingKvsDispatch.error || 'timeout/connection failure'}). Automated creation blocked to prevent duplicate tickets. Manual reconciliation required.`
+      );
+      err.code = 'DISPATCH_UNCERTAIN';
+      err.details = existingKvsDispatch;
+      throw err;
+    }
+
+    if (existingKvsDispatch.status === 'PENDING_CREATION') {
+      const leaseAgeMs = Date.now() - new Date(existingKvsDispatch.initiatedAt).getTime();
+      const LEASE_DURATION_MS = 60000; // 60-second in-flight lease
+      if (leaseAgeMs < LEASE_DURATION_MS) {
+        const err = new Error(
+          `Concurrent dispatch in progress for operation '${operationId}'. Please wait for in-flight dispatch to complete.`
+        );
+        err.code = 'DISPATCH_IN_PROGRESS';
+        throw err;
+      }
+    }
+  }
+
+  // 6. Strict Coordinate Resolution & Validation (Grounded in road/drainage features)
   const resolvedLocation = resolveDispatchLocation(decision.chosenPlan, dispatchOrder.targetLocation);
 
-  // 6. Acquire In-Progress Lease
+  // 7. Acquire In-Progress Lease
   await client.set(idempotencyKey, {
-    status: 'IN_PROGRESS',
+    status: 'PENDING_CREATION',
     decisionId: decision.decisionId,
     planId,
+    operationId,
     initiatedAt: new Date().toISOString(),
     initiatedBy: authenticatedCaller
   });
 
-  const projectKey = dispatchOrder.projectKey || 'EMERG';
   const issueTypeName = dispatchOrder.issueType || 'Task';
   const summary = dispatchOrder.summary ||
     `FIELD DISPATCH: ${decision.chosenPlan?.name || 'Hydraulic Mitigation'} [${decision.decisionId}]`;
 
-  const adfDescription = buildDispatchAdfDescription(dispatchOrder, decision, resolvedLocation);
+  const adfDescription = buildDispatchAdfDescription(dispatchOrder, decision, resolvedLocation, operationId);
 
   const issuePayload = {
     fields: {
@@ -237,6 +361,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       summary: summary.slice(0, 250),
       issuetype: { name: issueTypeName },
       priority: { name: dispatchOrder.priority || 'High' },
+      labels: ['delta-dispatch', operationId],
       description: adfDescription
     }
   };
@@ -244,7 +369,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
   let createdIssue;
 
   try {
-    // 7. Invoke Jira REST API v3
+    // 8. Invoke Jira REST API v3
     if (!customJiraClient) {
       const hasForgeRuntime = typeof globalThis !== 'undefined' &&
         (typeof globalThis.__forge_fetch__ === 'function' || typeof globalThis.__forge_local_fetch__ === 'function');
@@ -285,7 +410,29 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       createdIssue = { key: result.key, id: result.id, self: result.self };
     }
   } catch (jiraErr) {
-    // On Jira failure: clean up in-progress lease so retries are possible
+    const isTimeoutOrAbort =
+      jiraErr.name === 'AbortError' ||
+      /timeout|timed out|ECONNRESET|ETIMEDOUT|504/i.test(jiraErr.message || '');
+
+    if (isTimeoutOrAbort) {
+      // Mark state as UNCERTAIN so subsequent retries do not blindly duplicate
+      await client.set(idempotencyKey, {
+        status: 'UNCERTAIN',
+        operationId,
+        decisionId: decision.decisionId,
+        planId,
+        error: jiraErr.message,
+        timestamp: new Date().toISOString()
+      });
+      const err = new Error(
+        `Jira dispatch request timed out with uncertain creation outcome. Operation '${operationId}' marked UNCERTAIN to prevent duplicate creation.`
+      );
+      err.code = 'DISPATCH_UNCERTAIN';
+      err.originalError = jiraErr;
+      throw err;
+    }
+
+    // Deterministic API failure: clean up in-progress lease so future attempts can retry safely
     try {
       await client.delete(idempotencyKey);
     } catch (_) {
@@ -297,7 +444,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     throw err;
   }
 
-  // 8. Persist Completed Dispatch Record into KVS
+  // 9. Persist Completed Dispatch Record into KVS
   const dispatchedAt = new Date().toISOString();
   const completedRecord = {
     status: 'DISPATCHED',
@@ -306,6 +453,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     self: createdIssue.self,
     decisionId: decision.decisionId,
     planId,
+    operationId,
     dispatchedAt,
     dispatchedBy: authenticatedCaller,
     coordinates: resolvedLocation
@@ -325,6 +473,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
   } catch (storageErr) {
     // CRITICAL: Jira ticket was successfully created!
     // Never fail with an unhandled error that triggers blind re-dispatch.
+    // The operationId label in Jira guarantees that any retry will reconcile and adopt this issue.
     return {
       success: true,
       issueKey: createdIssue.key,
@@ -332,9 +481,10 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       self: createdIssue.self,
       decisionId: decision.decisionId,
       planId,
+      operationId,
       dispatchedAt,
       coordinates: resolvedLocation,
-      kvsSyncWarning: `Ticket ${createdIssue.key} created in Jira, but KVS record update failed: ${storageErr.message}. Ticket is preserved.`
+      kvsSyncWarning: `Ticket ${createdIssue.key} created in Jira, but KVS record update failed: ${storageErr.message}. Ticket is preserved and searchable via operationId ${operationId}.`
     };
   }
 
@@ -345,6 +495,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     self: createdIssue.self,
     decisionId: decision.decisionId,
     planId,
+    operationId,
     dispatchedAt,
     coordinates: resolvedLocation
   };

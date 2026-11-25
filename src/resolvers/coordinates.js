@@ -75,6 +75,7 @@ export const GEOGRAPHIC_ENVELOPE = {
 
 /**
  * Authoritative locations of physical infrastructure and intervention staging sites.
+ * Explicitly grounded in surveyed culverts and road segment features (never building centroids).
  */
 export const AUTHORITATIVE_INTERVENTION_LOCATIONS = {
   // Plan Beta: Muddy River / Brookline Ave culvert clearing and mobile pumping
@@ -85,17 +86,23 @@ export const AUTHORITATIVE_INTERVENTION_LOCATIONS = {
     projected: { x: 232302.11, y: 899074.88 },
     wgs84: { lat: 42.34150, lon: -71.10800 },
     gridCell: [17, 26],
+    featureType: 'culvert_inlet',
+    featureId: 'CULVERT-01-BROOKLINE',
     accessCorridor: 'Longwood Ave → Brookline Ave South (Francis St ambulance approach clear)'
   },
-  // Plan Alpha: Rapid deployable barrier along Francis St protecting Brigham and Women's Hospital
+  // Plan Alpha: Rapid deployable barrier along Francis Street roadway protecting BWH ambulance access
+  // Grounded in OSM road feature ROAD-1377084984 (secondary municipal road corridor directly fronting emergency bay)
   'plan-alpha': {
-    siteId: 'FAC-01-BWH',
-    name: "Francis Street Ambulance Route (Brigham and Women's Hospital)",
-    facilityCategory: 'Level 1 Trauma Center Emergency Access',
-    projected: { x: 232387.58, y: 898408.81 },
-    wgs84: { lat: 42.33550, lon: -71.10700 },
+    siteId: 'ROAD-1377084984',
+    name: 'Francis Street Emergency Barrier Line (OSM Way 1377084984)',
+    facilityCategory: 'Municipal Roadway Flood Barrier Staging Corridor',
+    projected: { x: 232384.06, y: 898414.94 },
+    wgs84: { lat: 42.33556, lon: -71.10704 },
     gridCell: [43, 29],
-    accessCorridor: 'Huntington Ave → Francis St / Shattuck St approach'
+    featureType: 'road_segment',
+    featureId: 'ROAD-1377084984',
+    osmId: 1377084984,
+    accessCorridor: 'Huntington Ave → Francis St / Shattuck St ambulance approach'
   },
   // Plan Gamma / Choke: Fenway Emerald Necklace restriction point
   'plan-gamma': {
@@ -105,6 +112,8 @@ export const AUTHORITATIVE_INTERVENTION_LOCATIONS = {
     projected: { x: 232713.09, y: 899298.94 },
     wgs84: { lat: 42.34350, lon: -71.10300 },
     gridCell: [8, 42],
+    featureType: 'culvert_inlet',
+    featureId: 'CULVERT-02-FENWAY-CHOKE',
     accessCorridor: 'Park Drive → Agassiz Road Staging Area'
   }
 };
@@ -188,6 +197,8 @@ export function isInsideGeographicEnvelope(lat, lon) {
  * Validates, checks bounds, and reconciles a target location.
  * Ensures mutual consistency between WGS84 and EPSG:26986 coordinates.
  * 
+ * Enforces strict 25.0m maximum tolerance (exactly 1 computational grid cell).
+ * 
  * @param {object} loc - Candidate location with optional projected and/or wgs84
  * @returns {object} Validated structured location object
  */
@@ -231,7 +242,7 @@ export function validateAndReconcileLocation(loc) {
     // Both systems provided: assert mutual mathematical consistency
     const expectedProj = latLonToProjected(lat, lon);
     const distanceM = Math.hypot(x - expectedProj.x, y - expectedProj.y);
-    const MAX_TOLERANCE_METERS = 50.0;
+    const MAX_TOLERANCE_METERS = 25.0; // Strictly 1 grid cell width (25.0m)
 
     if (distanceM > MAX_TOLERANCE_METERS) {
       const err = new Error(
@@ -263,14 +274,18 @@ export function validateAndReconcileLocation(loc) {
     wgs84Formatted: `${lat.toFixed(5)}° N, ${Math.abs(lon).toFixed(5)}° W`,
     epsg26986Formatted: `Easting: ${x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m, Northing: ${y.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m`,
     gridCellFormatted: `[Row ${row}, Col ${col}]`,
-    accessCorridor: loc.accessCorridor || 'Primary Municipal Artery'
+    accessCorridor: loc.accessCorridor || 'Primary Municipal Artery',
+    featureType: loc.featureType || 'custom_location',
+    featureId: loc.featureId || undefined
   };
 }
 
 /**
  * Resolves the designated field dispatch location for an approved intervention plan.
  * Strictly derives coordinates from authoritative dataset features and prevents
- * arbitrary substitution of the Brookline culvert for other interventions.
+ * arbitrary substitution of the Brookline culvert or hospital building centroids.
+ * 
+ * If a plan location cannot be established from the dataset, fails closed.
  * 
  * @param {object} chosenPlan - The approved plan object from Decision Record
  * @param {object} [orderLocationOverride] - Optional explicit location passed in dispatch order
@@ -292,7 +307,9 @@ export function resolveDispatchLocation(chosenPlan, orderLocationOverride = null
       y: auth.projected.y,
       lat: auth.wgs84.lat,
       lon: auth.wgs84.lon,
-      accessCorridor: auth.accessCorridor
+      accessCorridor: auth.accessCorridor,
+      featureType: auth.featureType,
+      featureId: auth.featureId
     });
   }
 
@@ -301,10 +318,10 @@ export function resolveDispatchLocation(chosenPlan, orderLocationOverride = null
     return validateAndReconcileLocation(chosenPlan.targetLocation);
   }
 
-  // Reject unrecognized plan without location: DO NOT fall back to Brookline culvert!
+  // Fail closed if location cannot be established: DO NOT fall back to Brookline culvert or building centroid!
   const err = new Error(
-    `Cannot resolve dispatch location: Intervention plan '${chosenPlan?.planId || 'unknown'}' does not have an authoritative dataset location and no valid targetLocation was provided.`
+    `Unresolved intervention location: Intervention plan '${chosenPlan?.planId || 'unknown'}' does not have an authoritative dataset feature location and no valid targetLocation was provided.`
   );
-  err.code = 'MISSING_TARGET_LOCATION';
+  err.code = 'UNRESOLVED_INTERVENTION_LOCATION';
   throw err;
 }

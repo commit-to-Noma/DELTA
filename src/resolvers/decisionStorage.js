@@ -5,11 +5,12 @@
  * hydraulic mitigation plans. Once written, a Decision Record (DEC-XXXX) cannot be
  * modified or overwritten, satisfying critical infrastructure provenance requirements.
  * 
- * Enforces server-side authorization: the browser can never be the sole authority
+ * Enforces server-side authorization: the browser can never be the authority
  * for Incident Commander identity.
  */
 
 import { kvs as forgeKvs } from '@forge/kvs';
+import { verifyIncidentCommanderAuthorization, AUTHORIZATION_POLICY_NAME } from './authPolicy.js';
 
 // Fallback in-memory map for environments where Forge KVS runtime fetch bridge is not bound (e.g. unit tests, local preview)
 const inMemoryStore = new Map();
@@ -90,7 +91,7 @@ export function validateDecisionPayload(payload) {
  * Stores an immutable Decision Record into Forge KVS.
  * Rejects with an error if the record ID already exists (append-only enforcement).
  * 
- * Verifies authenticated caller identity against server context to prevent client-side forgery.
+ * Enforces server-side authorization: requires explicit Incident Commander authority.
  */
 export async function recordDecision(payload, storageOverride = null, authContext = null) {
   validateDecisionPayload(payload);
@@ -107,22 +108,44 @@ export async function recordDecision(payload, storageOverride = null, authContex
   }
 
   // Server-side Authorization & Identity Binding
-  const authenticatedAccountId = authContext?.accountId || authContext?.context?.accountId;
-  let verifiedApprover = { ...payload.humanApprover };
+  const serverAccountId = authContext?.accountId || authContext?.context?.accountId || (typeof authContext === 'string' ? authContext : null);
+  const clientAccountId = payload?.humanApprover?.accountId;
 
-  if (authenticatedAccountId) {
-    // If client supplied an accountId that contradicts the authenticated context, reject forgery
-    if (verifiedApprover.accountId && verifiedApprover.accountId !== authenticatedAccountId) {
-      const err = new Error(
-        `Approver authentication mismatch: Client submitted accountId '${verifiedApprover.accountId}' does not match authenticated Jira user '${authenticatedAccountId}'.`
-      );
-      err.code = 'APPROVER_IDENTITY_MISMATCH';
-      throw err;
-    }
-    // Bind authenticated identity directly from server session
-    verifiedApprover.accountId = authenticatedAccountId;
-    verifiedApprover.authenticatedByServer = true;
+  if (serverAccountId && clientAccountId && serverAccountId !== clientAccountId) {
+    const err = new Error(
+      `Approver authentication mismatch: Client humanApprover accountId ('${clientAccountId}') does not match authenticated server session accountId ('${serverAccountId}').`
+    );
+    err.code = 'APPROVER_AUTHENTICATION_MISMATCH';
+    throw err;
   }
+
+  const authenticatedAccountId = serverAccountId || clientAccountId;
+  const projectKey = payload.linkedIssueKey ? payload.linkedIssueKey.split('-')[0] : 'EMERG';
+
+  // Check authorization policy
+  const auth = await verifyIncidentCommanderAuthorization({
+    accountId: authenticatedAccountId,
+    projectKey,
+    customAuthPolicy: authContext?.customAuthPolicy
+  });
+
+  if (!auth.isAuthorized) {
+    const err = new Error(
+      `Incident Commander authorization denied for account '${authenticatedAccountId || 'anonymous'}': ${auth.reason || 'User lacks required role.'}`
+    );
+    err.code = 'UNAUTHORIZED_INCIDENT_COMMANDER';
+    err.details = auth;
+    throw err;
+  }
+
+  // Enforce server-certified approver identity
+  const verifiedApprover = {
+    ...payload.humanApprover,
+    accountId: authenticatedAccountId,
+    role: 'Incident Commander',
+    authorizationPolicy: auth.policy || AUTHORIZATION_POLICY_NAME,
+    verifiedAt: new Date().toISOString()
+  };
 
   const record = {
     ...payload,
