@@ -1,4 +1,4 @@
-import Resolver from '@forge/resolver';
+import ResolverModule from '@forge/resolver';
 import {
   recordDecision,
   getDecision,
@@ -67,6 +67,15 @@ export {
   AUTHORITATIVE_GRAPH_EDGES
 };
 
+function resolveResolverConstructor(mod) {
+  if (typeof mod === 'function') return mod;
+  if (typeof mod?.default === 'function') return mod.default;
+  if (typeof mod?.Resolver === 'function') return mod.Resolver;
+  if (typeof mod?.default?.default === 'function') return mod.default.default;
+  return mod;
+}
+
+const Resolver = resolveResolverConstructor(ResolverModule);
 const resolver = new Resolver();
 
 export const SIMULATION_RUN_KEY = 'simulation:latest-run';
