@@ -118,5 +118,5 @@ In Codegeist judging, ties are broken sequentially using the order of criteria b
    - Creates a Jira Service Management dispatch issue with exact GPS coordinates and crew requirements.
    - Generates an immutable, comprehensive Post-Incident Runbook in Confluence via Forge API.
 6. **4:15 - 4:45 | Architecture, Security & Forge Native Rationale**:
-   - 100% serverless, zero egress, zero external database, data residency compliance.
+   - 100% serverless, zero egress, zero external database, Runs on Atlassian eligible.
 

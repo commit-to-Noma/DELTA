@@ -17,8 +17,9 @@
 - [x] **0.5.1 Technical & Scope Audit**: Formulated and committed `TECHNICAL_AND_SCOPE_AUDIT.md`. *(Committed: fdb6fd5)*
 - [x] **0.5.2 Data Integrity Labels**: Calibrated all synthetic data indicators across `FloodSimulationView.tsx`, `DecisionRecordsView.tsx`, and `OperationalTicketsView.tsx`. *(Committed: fdb6fd5)*
 - [x] **0.5.3 Forge Entry Point Alignment**: Configured `src/App.tsx` to default directly into the operational application shell, keeping the landing page accessible via `?view=landing`. *(Committed: fdb6fd5)*
-- [x] **0.5.4 Spike A (Forge Custom UI & Manifest)**: Defined `manifest.yml` with `jira:projectPage`, nodejs22.x runtime. Registered app (`7c4b604a-2340-4df7-8c0a-8fd8e44b7a12`), deployed to development, and installed onto live Jira tenant `nomathembancube2005.atlassian.net`.
-- [x] **0.5.5 Spike B (Rovo Agent & Actions)**: Declared `rovo:agent` and `action` modules with `actionVerb: GET`, verified with 0 lint errors, and deployed resolver handler in `src/resolvers/index.js`.
+- [x] **0.5.4 Spike A (Forge Custom UI & Manifest)**: Defined `manifest.yml` with `jira:projectPage`, nodejs22.x runtime. Registered app (`7c4b604a-2340-4df7-8c0a-8fd8e44b7a12`), deployed to development, and installed onto live Jira tenant `nomathembancube2005.atlassian.net`. Verified `forge eligibility` passing for Runs on Atlassian.
+- [x] **0.5.5 Spike B.1 (Rovo Manifest & Resolver Scaffolding)**: Declared `rovo:agent` and `action` modules with `actionVerb: GET`, verified with 0 lint errors, and deployed dual-mode resolver handler in `src/resolvers/index.js` (6 unit tests passing).
+- [ ] **0.5.6 Spike B.2 (Empirical Live Jira Verification)**: Live testing on development Jira site: Rovo agent response in Jira chat window, Forge KVS storage read/write, minimal workflow validator gate blocking a transition, and JSM ticket creation.
 
 ---
 
@@ -35,7 +36,7 @@
 
 ## [ ] Phase 2: Dynamic Disruption & In-Flight Replanning
 - [ ] **2.1 Disruption State Manager**: Model culvert debris blockages (e.g. 80% loss of Muddy River gravity inlet capacity), emergency road closures, and localized pump failures with explicit before/after delta states.
-- [ ] **2.2 Live 2D Recalculation Engine**: Recompute downstream overland flood propagation and emergency hospital artery accessibility in real-time ($< 50\text{ms}$ sub-stepping) using the diffusive-wave solver.
+- [ ] **2.2 Live 2D Recalculation Engine**: Recompute downstream overland flood propagation and emergency hospital artery accessibility using the 2D diffusive-wave solver with adaptive sub-stepping.
 - [ ] **2.3 Causal Replanning Engine**: Automatically compute changes in critical hospital ingress/egress routes and generate clear, deterministic engineering justifications for why initial plans failed.
 
 ---
@@ -57,7 +58,7 @@
 
 ## [ ] Phase 5: Append-Only Decision Records & Forge Storage
 - [ ] **5.1 Append-Only Ledger Schema**: Design auditable record schema (unique ID `DEC-XXXX`, scenario hash, baseline storm, chosen plan, physical metrics, human authorizing officer, timestamp) labelled "Append-only by application design".
-- [ ] **5.2 Forge KVS Storage Persistence**: Persist Decision Records using `@forge/api` Key-Value Storage (`storage.set`, `storage.get`) with zero external database dependencies for 100% data residency compliance.
+- [ ] **5.2 Forge KVS Storage Persistence**: Persist Decision Records using `@forge/api` Key-Value Storage (`storage.set`, `storage.get`) with zero external database dependencies (Runs on Atlassian eligible, zero third-party egress).
 - [ ] **5.3 Human-in-the-Loop Approval Gate**: Implement strict human authorization step preventing autonomous execution; only an authorized incident commander can sign and commit a decision block.
 
 ---

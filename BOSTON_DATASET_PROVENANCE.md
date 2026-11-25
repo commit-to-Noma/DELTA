@@ -77,7 +77,7 @@ In strict accordance with `HACKATHON_GUIDELINES.md` and `DESIGN.md`, DELTA maint
 | **Topography ($z_i$)** | **Measured Ground Truth** | USGS 3DEP 1m LiDAR | Stored in `elevationMatrix`; displayed as actual ground surface elevation. |
 | **Hospital Coordinates & Footprints** | **Measured Ground Truth** | OpenStreetMap (ODbL) | Sourced directly from OSM ways and relations (`isMeasuredLocation: true`). |
 | **Road Network Geometry** | **Measured Ground Truth** | OpenStreetMap (ODbL) | Real street centerlines projected into EPSG:26986 and clipped (`isRealGeometry: true`). |
-| **Culvert & Sump Inflow Capacities** | **Modeled Assumption** | Boston Water and Sewer Commission (BWSC) reports | Modeled as point sinks with explicit default design capacities (`isModelledAssumption: true`). |
+| **Culvert & Sump Inflow Capacities** | **Modeled Assumption** | Literature-based representative capacities | Modeled as point sinks with explicit default design capacities (`isModelledAssumption: true`). Not measured BWSC SCADA telemetry. Capacities are adjustable in the UI. |
 | **Infiltration Capacity** | **Modeled Assumption** | Green-Ampt representative urban values | Parameterized as uniform or zone-based loss rates ($2.0$ to $5.0\text{ mm/h}$). |
 | **Overland Roughness (Manning $n$)** | **Calibrated Parameter** | Literature standard for dense urban streetscapes | Set to $n = 0.025\text{ s}\cdot\text{m}^{-1/3}$ (asphalt and concrete with street furniture). |
 | **Rainfall Hyetographs** | **Synthetic Design Event** | NOAA Atlas 14 precipitation frequency statistics | Modeled temporal distribution applied uniformly or spatially across the domain. |
@@ -86,23 +86,23 @@ In strict accordance with `HACKATHON_GUIDELINES.md` and `DESIGN.md`, DELTA maint
 
 ## 5. Modelled Drainage Infrastructure Inventory
 
-Because subsurface municipal storm sewer networks are proprietary, security-sensitive, and not continuously measured in real time, DELTA represents municipal drainage as discrete point sinks with clearly documented modeling rationales:
+Municipal storm sewer pipe networks are highly complex, sub-surface, and proprietary (Boston Water and Sewer Commission reports over 30,000 catch basins citywide). In DELTA, subterranean conveyance is represented using a **culvert sink abstraction**, aggregating localized overland drainage into discrete point sinks with clearly documented, user-adjustable assumptions:
 
 1. **`CULVERT-01-BROOKLINE` (Brookline Avenue Muddy River Culvert)**
    - *Projected Location*: $[X = 232,302.1\text{ m}, Y = 899,074.9\text{ m}]$ ($42.3415^\circ\text{N}, -71.1080^\circ\text{W}$).
    - *Grid Cell*: `[17, 26]` (index `1114`).
-   - *Design Capacity*: $12.5\text{ m}^3/\text{s}$.
+   - *Design Capacity*: $12.5\text{ m}^3/\text{s}$ (Adjustable planning assumption).
    - *Rationale*: Represents the major hydraulic culvert transition where Muddy River passes beneath Brookline Avenue into the Fenway conduit.
 2. **`CULVERT-02-FENWAY-CHOKE` (Fenway Emerald Necklace Choke Point)**
    - *Projected Location*: $[X = 232,713.1\text{ m}, Y = 899,298.9\text{ m}]$ ($42.3435^\circ\text{N}, -71.1030^\circ\text{W}$).
    - *Grid Cell*: `[8, 42]` (index `554`).
-   - *Design Capacity*: $8.0\text{ m}^3/\text{s}$.
+   - *Design Capacity*: $8.0\text{ m}^3/\text{s}$ (Adjustable planning assumption).
    - *Rationale*: Historic hydraulic restriction point subject to debris accumulation and backwater effects during major overland runoff events.
-3. **`DRAIN-03-LONGWOOD-WEST` (Longwood West Storm Drainage Sump)**
+3. **`DRAIN-03-LONGWOOD-WEST` (Assumed Overland Sump Inflow - Longwood Low Basin)**
    - *Projected Location*: $[X = 232,222.5\text{ m}, Y = 898,463.6\text{ m}]$ ($42.3360^\circ\text{N}, -71.1090^\circ\text{W}$).
    - *Grid Cell*: `[41, 22]` (index `2646`).
-   - *Design Capacity*: $4.5\text{ m}^3/\text{s}$.
-   - *Rationale*: Modeled retention sump and pump station protecting the low-elevation ambulance approach to Brigham and Women's Hospital.
+   - *Design Capacity*: $4.5\text{ m}^3/\text{s}$ (Adjustable planning assumption).
+   - *Rationale*: Generic assumed municipal drainage sink representing localized gravity catch basin aggregation in the Longwood low basin. Not a documented municipal pump station. Capacity is an adjustable planning-level assumption.
 
 ---
 

@@ -41,14 +41,14 @@ By synthesizing judge expectations with enterprise marketplace design patterns, 
 
 **DELTA Action**:
 - The demo video (< 5:00 min) and judge testing sandbox will focus on a single, uninterrupted, high-stakes **Golden Journey**:
-  1. **Pre-Storm Baseline**: Boston Longwood Medical Area facing a NOAA Atlas 14 50-year storm ($52.0\text{ mm/h}$). All 5 hospitals accessible.
-  2. **Unplanned Dynamic Disruption**: Muddy River Culvert suffered an 80% debris blockage.
-  3. **Live Recalculation**: Brookline Avenue arterial floods to $0.42\text{ m}$ within 12 minutes, cutting off Brigham and Women's and Boston Children's emergency ambulance bays.
-  4. **Multi-Scenario Evaluation**: Simulation of 3 competing interventions (Sandbag Dyking vs. Mobile Pumping vs. Culvert Clearing) against the exact same physics baseline.
-  5. **Explainable Rovo Audit**: Atlassian Rovo agent explains why Mobile Pumping de-risks the hospital corridor while Sandbagging merely diverts water to BIDMC East Campus.
+  1. **Pre-Storm Baseline**: Boston Longwood Medical Area facing a NOAA Atlas 14 50-year storm ($56.5\text{ mm/h}$ peak intensity from dataset). All 5 hospitals monitored.
+  2. **Unplanned Dynamic Disruption**: Muddy River Culvert suffers an 80% debris blockage.
+  3. **Live Solver Recalculation**: 2D diffusive-wave solver computes overland flow propagation across the 64x64 grid; Brookline Avenue arterial inundation is computed dynamically, identifying ambulance corridor restriction.
+  4. **Multi-Scenario Evaluation**: Simulation of 3 competing interventions (Sandbag Dyking vs. Mobile Pumping vs. Culvert Jetting) against the exact same physics baseline.
+  5. **Explainable Rovo Audit**: Atlassian Rovo agent explains physical trade-offs (e.g. why Mobile Pumping de-risks the hospital corridor while Sandbagging merely deflects floodwater toward BIDMC East Campus).
   6. **Human Approval & Append-Only Record**: Incident Commander approves Plan B, persisting an append-only Decision Record in Forge KVS storage.
   7. **JSM Field Dispatch & Workflow Transition**: Automatically creates field crew dispatch tickets in Jira Service Management with exact coordinates and unlocks the incident workflow transition.
-  8. **Confluence Post-Incident Runbook**: One-click generation of the complete engineering runbook in Confluence via Forge API.
+  8. **Audit Documentation**: Complete post-incident engineering audit trail generated with verified solver metrics.
 
 ### 2.4. Platform Infrastructure & API Clarifications
 1. **Forge LLM Billing Warning (Danny & Adam)**:

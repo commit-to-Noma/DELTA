@@ -113,7 +113,7 @@ The simulation loop is managed in `FloodSimulationView.tsx` with high temporal s
 - **Sub-stepping**: The hydraulic engine internally adaptively subdivides each 2-second macro-timestep into CFL-stable sub-steps ($\Delta t_{\text{sub}} \le 0.5\text{ s}$).
 - **Playback Rates**: Configurable at 1x, 2x, or 5x speed via `setInterval` ticking at 60ms intervals.
 - **Controls**: Run / Pause / Step (+2s) / Reset.
-- **Rainfall Forcing**: Switchable between NOAA Atlas 14 events (10-yr: $35.0\text{ mm/h}$, 50-yr: $52.0\text{ mm/h}$, 100-yr: $68.0\text{ mm/h}$) or a custom slider ($0 - 150\text{ mm/h}$).
+- **Rainfall Forcing**: Switchable between NOAA Atlas 14 events (10-yr: $42.0\text{ mm/h}$, 50-yr: $56.5\text{ mm/h}$, 100-yr: $68.0\text{ mm/h}$) or a custom slider ($0 - 150\text{ mm/h}$).
 
 ---
 

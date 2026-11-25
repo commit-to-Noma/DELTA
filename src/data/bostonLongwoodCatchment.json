@@ -19912,7 +19912,7 @@
     },
     {
       "inletId": "CULVERT-02-FENWAY-CHOKE",
-      "name": "Fenway Emerald Necklace Choke Point (Drain B)",
+      "name": "Fenway Emerald Necklace Choke Point",
       "location": {
         "lat": 42.3435,
         "lon": -71.103,
@@ -19927,11 +19927,11 @@
       "designCapacityM3PerSec": 8.0,
       "defaultBlockageRatio": 0.0,
       "isModelledAssumption": true,
-      "modellingRationale": "Historic flood restriction point subject to debris accumulation during high overland storm runoff."
+      "modellingRationale": "Historic flood restriction point subject to debris accumulation during high overland storm runoff. Capacity is an adjustable planning-level assumption."
     },
     {
       "inletId": "DRAIN-03-LONGWOOD-WEST",
-      "name": "Longwood West Storm Drainage Sump",
+      "name": "Assumed Overland Sump Inflow (Longwood Low Basin)",
       "location": {
         "lat": 42.336,
         "lon": -71.109,
@@ -19946,7 +19946,7 @@
       "designCapacityM3PerSec": 4.5,
       "defaultBlockageRatio": 0.0,
       "isModelledAssumption": true,
-      "modellingRationale": "Modeled retention and pumping inlet protecting the low elevation approach to Brigham and Women's Hospital."
+      "modellingRationale": "Generic assumed municipal drainage sink representing localized gravity catch basin aggregation in the Longwood low basin. Not a documented municipal pump station. Capacity is an adjustable planning-level assumption."
     }
   ],
   "rainfallProfiles": {

@@ -1,8 +1,10 @@
-# DELTA — Independent Technical Audit of Hydraulic Solver
+# DELTA — Internal Developer Self-Audit of Hydraulic Solver
 
+**Document Type**: Developer Self-Audit & Code Inspection  
 **Audit Date**: November 2026  
 **Subject**: Core Hydraulic Solver Engine (`src/simulation/hydraulicSolver.ts`, `MATHEMATICAL_SOLVER_SPECIFICATION.md`)  
-**Scope**: Code-level inspection, dimensional analysis, numerical stability derivation, defect identification, and empirical testing.
+**Scope**: Code-level inspection, dimensional analysis, numerical stability derivation, defect identification, standard hydrodynamic benchmarks (Lake-at-Rest, Planar Slope vs. Manning normal depth), and empirical testing.  
+**Auditor Disclosure**: Conducted by the DELTA engineering team (self-audit). This is an internal technical verification and code review, not a third-party independent certification.
 
 ---
 
