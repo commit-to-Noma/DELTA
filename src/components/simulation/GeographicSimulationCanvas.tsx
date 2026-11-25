@@ -59,13 +59,22 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [internalHover, setInternalHover] = useState<{ row: number; col: number } | null>(null);
-  const satelliteImgRef = useRef<HTMLImageElement | null>(null);
+  const [satelliteImage, setSatelliteImage] = useState<HTMLImageElement | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     const img = new Image();
     img.src = './usgs_satellite_still.png';
     img.onload = () => {
-      satelliteImgRef.current = img;
+      if (isMounted) {
+        setSatelliteImage(img);
+      }
+    };
+    img.onerror = (e) => {
+      console.warn('[DELTA] Satellite imagery still failed to load:', e);
+    };
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -192,8 +201,8 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.fillRect(0, 0, width, height);
 
     // 1b. Render Genuine USGS Satellite Imagery Still (USGS National Map Imagery Only)
-    if (activeLayers.satellite && satelliteImgRef.current) {
-      ctx.drawImage(satelliteImgRef.current, originX, originY, displaySize, displaySize);
+    if (activeLayers.satellite && satelliteImage) {
+      ctx.drawImage(satelliteImage, originX, originY, displaySize, displaySize);
     }
 
     // 2. Render 64x64 Terrain Elevation Raster
@@ -513,6 +522,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     getElevationColor,
     nx,
     ny,
+    satelliteImage,
     waterDepth,
     internalHover,
     selectedCell,

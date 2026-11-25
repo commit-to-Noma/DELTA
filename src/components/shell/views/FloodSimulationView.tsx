@@ -242,16 +242,23 @@ export const FloodSimulationView: React.FC = () => {
       maxWaterDepthM: Math.round(maxDepth * 1000) / 1000,
       impassableRoadsCount,
       atRiskFacilities,
+      durationHours: activeStorm?.durationHours || 6.0,
+      stormDepthMm: activeStorm?.totalDepthMm || (selectedStormId === 'custom' ? customRainfall * 6 : 104.2),
       timestamp: new Date().toISOString()
     };
 
     try {
-      await invoke('saveSimulationRun', summary);
-      setSaveTelemetryStatus('SAVED TO KVS');
+      const res: any = await invoke('saveSimulationRun', summary);
+      if (res && res.success) {
+        setSaveTelemetryStatus('SAVED TO FORGE KVS');
+      } else {
+        const errorMsg = res?.error?.message || res?.status || 'STORAGE REJECTED';
+        setSaveTelemetryStatus(`SAVE FAILED (${errorMsg})`);
+      }
       setTimeout(() => setSaveTelemetryStatus(null), 3500);
     } catch (err: any) {
-      console.warn('[DELTA] saveSimulationRun notice:', err?.message || err);
-      setSaveTelemetryStatus('SAVED LOCALLY (OFFLINE)');
+      console.warn('[DELTA] saveSimulationRun bridge notice:', err?.message || err);
+      setSaveTelemetryStatus('BRIDGE UNAVAILABLE (NOT PERSISTED)');
       setTimeout(() => setSaveTelemetryStatus(null), 3500);
     }
   }, [activeStorm, atRiskFacilities, cumulativeRainfallMm, currentRainfallRate, impassableRoadsCount, selectedStormId, simState]);

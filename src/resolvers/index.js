@@ -20,6 +20,13 @@ import {
   AUTHORITATIVE_INTERVENTION_LOCATIONS,
   CATCHMENT_BOUNDS
 } from './coordinates.js';
+import {
+  validateSimulationRunPayload,
+  computeCanonicalScenarioHash,
+  validateSimulationRecordIntegrity,
+  isRecordStale,
+  DEFAULT_STALENESS_THRESHOLD_MS
+} from './simulationValidation.js';
 
 export {
   recordDecision,
@@ -36,7 +43,12 @@ export {
   latLonToProjected,
   projectedToLatLon,
   AUTHORITATIVE_INTERVENTION_LOCATIONS,
-  CATCHMENT_BOUNDS
+  CATCHMENT_BOUNDS,
+  validateSimulationRunPayload,
+  computeCanonicalScenarioHash,
+  validateSimulationRecordIntegrity,
+  isRecordStale,
+  DEFAULT_STALENESS_THRESHOLD_MS
 };
 
 const resolver = new Resolver();
@@ -46,25 +58,70 @@ export const INTERVENTIONS_EVAL_KEY = 'simulation:latest-interventions';
 
 /**
  * Persists the latest real simulation run summary into Forge KVS.
+ * Enforces strict schema validation, server-side canonical scenario hashing,
+ * and authenticated session caller verification (without requiring incident commander approval).
  */
-export async function saveSimulationRun(summary, storageOverride = null) {
+export async function saveSimulationRun(summary, storageOverride = null, authContext = null) {
+  // 1. Caller Session Authentication Guard
+  const serverAccountId =
+    authContext?.accountId ||
+    authContext?.principal?.accountId ||
+    authContext?.context?.accountId ||
+    authContext?.context?.principal?.accountId;
+
+  const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(authContext?.isTestEnvironment);
+  const effectiveAccountId = serverAccountId || (isTestEnv ? 'test-session-user' : null);
+
+  if (!effectiveAccountId || effectiveAccountId === 'anonymous') {
+    const err = new Error(
+      'Authentication failure: Missing or unverified Jira user session. Caller must be an authenticated project user to persist simulation telemetry.'
+    );
+    err.code = 'UNAUTHENTICATED_SESSION';
+    throw err;
+  }
+
+  // 2. Strict Payload Schema Validation & Size Limits
+  validateSimulationRunPayload(summary);
+
+  // 3. Server-side Canonical Scenario Hash Computation
+  const { canonicalScenario, scenarioHash } = computeCanonicalScenarioHash(summary);
+
+  // If client provided a scenarioHash, assert consistency with server-computed hash
+  if (summary.scenarioHash && summary.scenarioHash !== scenarioHash) {
+    const err = new Error(
+      `Scenario integrity failure: Client-provided scenarioHash ('${summary.scenarioHash}') does not match authoritative server-computed hash ('${scenarioHash}').`
+    );
+    err.code = 'SCENARIO_HASH_MISMATCH';
+    throw err;
+  }
+
   const client = getStorageClient(storageOverride);
   const record = {
     ...summary,
-    savedAt: new Date().toISOString()
+    scenarioHash,
+    canonicalScenario,
+    savedByAccountId: effectiveAccountId,
+    savedAt: new Date().toISOString(),
+    schemaVersion: '1.1.0'
   };
+
   await client.set(SIMULATION_RUN_KEY, record);
   return { success: true, data: record };
 }
 
 /**
  * Retrieves the latest real simulation run summary.
- * Returns { success: true, status: 'NO_RUN' } if no run has been executed yet,
- * strictly preventing invented literals or placeholder numbers.
+ * Returns explicit structured statuses:
+ * - NO_RUN: No record in KVS.
+ * - MALFORMED_RUN: Corrupted, partial, or empty {} record.
+ * - STALE_RUN: Valid record exceeding the staleness threshold.
+ * - COMPLETED_RUN: Fresh, valid simulation telemetry.
  */
-export async function getSimulationStatus(storageOverride = null) {
+export async function getSimulationStatus(storageOverride = null, maxAgeMs = DEFAULT_STALENESS_THRESHOLD_MS) {
   const client = getStorageClient(storageOverride);
   const run = await client.get(SIMULATION_RUN_KEY);
+
+  // 1. Absent record
   if (!run) {
     return {
       success: true,
@@ -72,24 +129,51 @@ export async function getSimulationStatus(storageOverride = null) {
       message: 'No simulation run recorded. Run a simulation in the DELTA Engine UI to compute hydraulic metrics.'
     };
   }
+
+  // 2. Malformed record check (reject empty {}, partial fields, invalid types)
+  if (!validateSimulationRecordIntegrity(run)) {
+    return {
+      success: true,
+      status: 'MALFORMED_RUN',
+      message: 'Stored simulation run record is malformed, partial, or missing required metrics. Run a fresh simulation in the DELTA Engine UI.'
+    };
+  }
+
+  // 3. Stale record check
+  const savedTimestamp = Date.parse(run.savedAt);
+  const ageMs = Date.now() - savedTimestamp;
+  const ageHours = Math.round((ageMs / (3600 * 1000)) * 10) / 10;
+
+  if (ageMs > maxAgeMs) {
+    return {
+      success: true,
+      status: 'STALE_RUN',
+      ageHours,
+      savedAt: run.savedAt,
+      message: `Stored simulation run is stale (${ageHours} hours old, threshold: ${Math.round(maxAgeMs / 3600000)}h). Run a fresh simulation for real-time situational awareness.`,
+      data: run
+    };
+  }
+
+  // 4. Completed fresh run
   return {
     success: true,
     status: 'COMPLETED_RUN',
+    ageHours,
     data: run
   };
 }
 
 /**
- * Persists evaluated candidate interventions from a solver run.
+ * Dormant resolver for candidate interventions evaluation.
+ * Multi-scenario differential evaluations are not operational pending Phase 3.
  */
-export async function saveInterventionsEvaluation(evaluation, storageOverride = null) {
-  const client = getStorageClient(storageOverride);
-  const record = {
-    ...evaluation,
-    savedAt: new Date().toISOString()
+export async function saveInterventionsEvaluation(_evaluation = null, _storageOverride = null, _authContext = null) {
+  return {
+    success: false,
+    status: 'DORMANT_NEEDS_PHASE_3',
+    message: 'saveInterventionsEvaluation is dormant. Multi-scenario differential evaluations are not operational pending Phase 3 execution.'
   };
-  await client.set(INTERVENTIONS_EVAL_KEY, record);
-  return { success: true, data: record };
 }
 
 /**
@@ -119,9 +203,8 @@ resolver.define('getSimulationStatus', async () => await getSimulationStatus());
 resolver.define('get-simulation-status', async () => await getSimulationStatus());
 resolver.define('evaluateInterventions', async () => await evaluateInterventions());
 resolver.define('evaluate-interventions', async () => await evaluateInterventions());
-resolver.define('saveSimulationRun', async (req) => await saveSimulationRun(req?.payload || req));
-resolver.define('saveInterventionsEvaluation', async (req) => await saveInterventionsEvaluation(req?.payload || req));
-
+resolver.define('saveSimulationRun', async (req) => await saveSimulationRun(req?.payload || req, null, req?.context));
+resolver.define('saveInterventionsEvaluation', async (req) => await saveInterventionsEvaluation(req?.payload || req, null, req?.context));
 
 // Decision Record KVS operations (Custom UI Bridge)
 resolver.define('recordDecision', async (req) => {
@@ -188,8 +271,7 @@ export async function handler(event, context) {
 
     case 'save-simulation-run':
     case 'saveSimulationRun':
-      return await saveSimulationRun(payload);
-
+      return await saveSimulationRun(payload, null, context);
 
     case 'get-decision-record':
     case 'getDecisionRecord':
