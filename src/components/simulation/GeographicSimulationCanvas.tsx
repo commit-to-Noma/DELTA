@@ -249,42 +249,52 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       }
     }
 
-    // 4. Render Simulated Overland Flood Water (From Hydraulic Solver Float64Array)
+    // 4. Render Simulated Overland Flood Water (Smooth Fluid Rendering)
     if (activeLayers.water) {
+      ctx.save();
       for (let r = 0; r < ny; r++) {
         for (let c = 0; c < nx; c++) {
           const idx = r * nx + c;
           const h = waterDepth[idx];
 
-          if (h >= 0.02) {
-            // Depths from 0.02m to 1.5m
-            let fillColor: string;
-            if (h < 0.10) {
-              // Shallow sheet flow: light cyan-blue
-              fillColor = 'rgba(56, 189, 248, 0.42)';
-            } else if (h < 0.30) {
-              // Moderate ponding: deep hydrological blue
-              fillColor = 'rgba(2, 132, 199, 0.65)';
-            } else if (h < 0.60) {
-              // Impassable flood: saturated navy blue
-              fillColor = 'rgba(3, 105, 161, 0.82)';
+          if (h >= 0.04) {
+            const x = originX + c * cellSize;
+            const y = originY + r * cellSize;
+            const intensity = Math.min(1.0, (h - 0.04) / 0.70);
+
+            // Vibrant fluid gradient: Cyan sheen -> Deep Cerulean -> Intense River Blue
+            const alpha = 0.50 + intensity * 0.40;
+            const rColor = Math.round(14 + (1 - intensity) * 30);
+            const gColor = Math.round(130 + (1 - intensity) * 80);
+            const bColor = 245;
+
+            ctx.fillStyle = `rgba(${rColor}, ${gColor}, ${bColor}, ${alpha})`;
+
+            // Soft overlapping rounded parcels merge adjacent cells into natural fluid pools
+            const expand = cellSize * 0.35;
+            const rx = x - expand * 0.5;
+            const ry = y - expand * 0.5;
+            const rw = cellSize + expand;
+            const rh = cellSize + expand;
+            const radius = Math.min(rw, rh) * 0.35;
+
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(rx, ry, rw, rh, radius);
             } else {
-              // Severe submersion: deep water blue with alert tint
-              fillColor = 'rgba(8, 47, 73, 0.92)';
+              ctx.rect(rx, ry, rw, rh);
             }
+            ctx.fill();
 
-            ctx.fillStyle = fillColor;
-            ctx.fillRect(originX + c * cellSize, originY + r * cellSize, cellSize + 0.4, cellSize + 0.4);
-
-            // Highlight deep water hazard border
+            // Highlight deep flood hazard (> 0.30m impassable for ambulances)
             if (h >= 0.30) {
-              ctx.strokeStyle = 'rgba(249, 115, 22, 0.45)';
-              ctx.lineWidth = 0.5;
-              ctx.strokeRect(originX + c * cellSize, originY + r * cellSize, cellSize, cellSize);
+              ctx.fillStyle = 'rgba(239, 68, 68, 0.28)'; // Soft emergency hazard glow
+              ctx.fill();
             }
           }
         }
       }
+      ctx.restore();
     }
 
     // 5. Render Hydraulic Velocity / Gradient Vectors

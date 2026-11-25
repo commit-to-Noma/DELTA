@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   CheckCircle2
 } from 'lucide-react';
-import { invoke } from '@forge/bridge';
+import { invokeSafe as invoke } from '../../../services/forgeBridge';
 
 interface StoredDecisionRecord {
   decisionId: string;

@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Info
 } from 'lucide-react';
-import { invoke } from '@forge/bridge';
+import { invokeSafe as invoke } from '../../../services/forgeBridge';
 import {
   loadBostonCatchment,
   createHydraulicConfigFromCatchment,
@@ -121,13 +121,13 @@ export const FloodSimulationView: React.FC = () => {
   }, [activeStorm, customRainfall, selectedStormId, simState.totalTimeSeconds]);
 
 
-  // 4. Layer Visibility (Includes Satellite Layer Still)
+  // 4. Layer Visibility (Satellite Map Enabled by Default for Real Geographic Clarity)
   const [activeLayers, setActiveLayers] = useState<CanvasLayerVisibility>({
-    satellite: false,
-    terrain: true,
-    contours: true,
+    satellite: true,
+    terrain: false,
+    contours: false,
     water: true,
-    vectors: true,
+    vectors: false,
     roads: true,
     facilities: true,
     drainage: true,
@@ -373,10 +373,10 @@ export const FloodSimulationView: React.FC = () => {
         </div>
       )}
 
-      {/* Main Simulation Layout: Left Canvas (8 Cols), Right Telemetry (4 Cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: Simulation Canvas Workspace */}
-        <div className="lg:col-span-8 bg-onyx-900 rounded border border-onyx-800 overflow-hidden shadow-tactical flex flex-col h-[640px]">
+      {/* Main Simulation Layout: Centered Canvas with Responsive Telemetry */}
+      <div className="flex flex-col xl:flex-row gap-6 items-start">
+        {/* Simulation Canvas Workspace (Prominent & Centered) */}
+        <div className="w-full xl:flex-1 bg-onyx-900 rounded-lg border border-onyx-800 overflow-hidden shadow-tactical flex flex-col h-[600px]">
           {/* Canvas Top Bar: Domain Title & Layer Toggles */}
           <div className="bg-onyx-950 px-4 py-2 border-b border-onyx-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
             <div className="flex items-center gap-2 text-storm-300">
@@ -611,8 +611,8 @@ export const FloodSimulationView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Operational Telemetry & Tactical Cell Inspector */}
-        <div className="lg:col-span-4 space-y-4">
+        {/* Tactical Telemetry & Cell Inspector */}
+        <div className="w-full xl:w-84 xl:flex-shrink-0 space-y-4">
           {/* Tactical Cell Inspector Panel */}
           <div className="bg-onyx-900 rounded border border-onyx-800 p-4 shadow-tactical space-y-3 font-mono text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-onyx-800 text-storm-400">

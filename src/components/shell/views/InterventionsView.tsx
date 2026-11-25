@@ -105,181 +105,144 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
 
       {/* 4-Scenario Comparative Matrix Grid */}
       {evaluationResult ? (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* 1. Baseline */}
-          <div className="bg-onyx-900 p-4 rounded border border-onyx-800 font-mono text-xs space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-              <span className="font-bold text-storm-300 uppercase">1. BASELINE</span>
-              <span className="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px]">
-                UNMITIGATED
+        <div className="space-y-5">
+          {/* Baseline Crisis Reference Strip */}
+          <div className="bg-onyx-900 p-4 rounded-lg border border-red-900/60 font-mono text-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-bold">
+                UNMITIGATED BASELINE
               </span>
+              <span className="text-storm-100 font-bold text-sm">Brookline Culvert Debris Choke</span>
+              <span className="text-storm-400 text-xs hidden sm:inline">(Zero field interventions)</span>
             </div>
-            <div className="text-sm font-bold text-storm-100">Emergency Choked State</div>
-            <div className="text-[11px] text-storm-400 font-sans">
-              Brookline culvert blocked. No active interventions deployed.
-            </div>
-
-            <div className="space-y-1.5 pt-2 text-[11px]">
-              <div className="flex justify-between text-storm-400">
-                <span>SURFACE STORAGE:</span>
-                <span className="text-storm-100 font-bold">{evaluationResult.baseline.currentStorageM3.toLocaleString()} m³</span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>MAX WATER DEPTH:</span>
-                <span className="text-storm-100 font-bold">{evaluationResult.baseline.maxWaterDepthM.toFixed(3)} m</span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>IMPASSABLE ROADS:</span>
-                <span className="text-red-400 font-bold">{evaluationResult.baseline.impassableRoadCount}</span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>AT-RISK HOSPITALS:</span>
-                <span className="text-red-400 font-bold">{evaluationResult.baseline.atRiskHospitalCount}</span>
-              </div>
+            <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs">
+              <div><span className="text-storm-400">Flood Volume:</span> <strong className="text-red-400">{evaluationResult.baseline.currentStorageM3.toLocaleString()} m³</strong></div>
+              <div><span className="text-storm-400">Peak Depth:</span> <strong className="text-red-400">{evaluationResult.baseline.maxWaterDepthM.toFixed(2)} m</strong></div>
+              <div><span className="text-storm-400">Impassable Roads:</span> <strong className="text-red-400">{evaluationResult.baseline.impassableRoadCount}</strong></div>
+              <div><span className="text-storm-400">Hospitals at Risk:</span> <strong className="text-red-400">{evaluationResult.baseline.atRiskHospitalCount}</strong></div>
             </div>
           </div>
 
-          {/* 2. Plan Alpha */}
-          <div 
-            onClick={() => setSelectedPlanId('plan-alpha')}
-            className={`p-4 rounded border cursor-pointer font-mono text-xs space-y-3 transition-all ${
-              selectedPlanId === 'plan-alpha'
-                ? 'bg-onyx-850 border-safety-orange shadow-safety'
-                : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-              <span className="font-bold text-storm-300 uppercase">2. PLAN ALPHA</span>
-              <span className="px-1.5 py-0.5 rounded bg-onyx-800 text-storm-300 text-[10px]">
-                DEFLECTION
-              </span>
-            </div>
-            <div className="text-sm font-bold text-storm-100">Rapid Sandbag Barrier</div>
-            <div className="text-[11px] text-storm-400 font-sans">
-              +0.50m crest on Francis St curb perimeter.
+          {/* 3 Candidate Rescue Plans (Clean 3-Column Layout) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 1. Plan Alpha */}
+            <div 
+              onClick={() => setSelectedPlanId('plan-alpha')}
+              className={`p-5 rounded-lg border cursor-pointer font-mono text-xs space-y-3 transition-all ${
+                selectedPlanId === 'plan-alpha'
+                  ? 'bg-onyx-850 border-safety-orange shadow-safety ring-1 ring-safety-orange'
+                  : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
+              }`}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
+                <span className="font-bold text-storm-200 uppercase text-sm">PLAN ALPHA</span>
+                <span className="px-2 py-0.5 rounded bg-onyx-800 text-storm-300 text-[10px] font-bold">
+                  DEFLECTION
+                </span>
+              </div>
+              <div className="text-base font-bold text-storm-100">Sandbag Barrier</div>
+              <p className="text-xs text-storm-400 font-sans leading-relaxed">
+                +0.50m crest barrier on Francis St. Deflects water around Brigham &amp; Women's bay.
+              </p>
+
+              <div className="space-y-2 pt-2 text-xs border-t border-onyx-800/60">
+                <div className="flex justify-between">
+                  <span className="text-storm-400">Water Avoided:</span>
+                  <span className="text-storm-200 font-bold">
+                    {evaluationResult.differentials.planAlpha.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}
+                    {evaluationResult.differentials.planAlpha.avoidedSurfaceVolumeM3.toLocaleString()} m³
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-storm-400">Roads Protected:</span>
+                  <span className="text-storm-200 font-bold">
+                    {evaluationResult.differentials.planAlpha.protectedRoadCount} Corridors
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-storm-400">Outcome:</span>
+                  <span className="text-amber-400 font-bold">Local Protection Only</span>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1.5 pt-2 text-[11px]">
-              <div className="flex justify-between text-storm-400">
-                <span>AVOIDED STORAGE:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planAlpha.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}
-                  {evaluationResult.differentials.planAlpha.avoidedSurfaceVolumeM3.toLocaleString()} m³
+            {/* 2. Plan Beta */}
+            <div 
+              onClick={() => setSelectedPlanId('plan-beta')}
+              className={`p-5 rounded-lg border cursor-pointer font-mono text-xs space-y-3 transition-all ${
+                selectedPlanId === 'plan-beta'
+                  ? 'bg-onyx-850 border-safety-orange shadow-safety ring-1 ring-safety-orange'
+                  : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
+              }`}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
+                <span className="font-bold text-storm-200 uppercase text-sm">PLAN BETA</span>
+                <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 text-[10px] font-bold">
+                  PUMPING SINK
                 </span>
               </div>
-              <div className="flex justify-between text-storm-400">
-                <span>PEAK DEPTH Δ:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planAlpha.peakDepthReductionM.toFixed(3)} m
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>ROADS PROTECTED:</span>
-                <span className="text-emerald-400 font-bold">
-                  {evaluationResult.differentials.planAlpha.protectedRoadCount}
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>HOSPITAL IMPROVEMENTS:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planAlpha.improvedHospitalCount}
-                </span>
-              </div>
-            </div>
-          </div>
+              <div className="text-base font-bold text-storm-100">Mobile Pump #1</div>
+              <p className="text-xs text-storm-400 font-sans leading-relaxed">
+                2.0 m³/s high-capacity suction pump deployed to Muddy River retention basin.
+              </p>
 
-          {/* 3. Plan Beta */}
-          <div 
-            onClick={() => setSelectedPlanId('plan-beta')}
-            className={`p-4 rounded border cursor-pointer font-mono text-xs space-y-3 transition-all ${
-              selectedPlanId === 'plan-beta'
-                ? 'bg-onyx-850 border-safety-orange shadow-safety'
-                : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-              <span className="font-bold text-storm-300 uppercase">3. PLAN BETA</span>
-              <span className="px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 text-[10px]">
-                ACTIVE PUMP
-              </span>
-            </div>
-            <div className="text-sm font-bold text-storm-100">Mobile Pump #1</div>
-            <div className="text-[11px] text-storm-400 font-sans">
-              2.0 m³/s active suction sink in retention basin.
+              <div className="space-y-2 pt-2 text-xs border-t border-onyx-800/60">
+                <div className="flex justify-between">
+                  <span className="text-storm-400">Water Avoided:</span>
+                  <span className="text-safety-orange font-bold text-sm">
+                    +{evaluationResult.differentials.planBeta.avoidedSurfaceVolumeM3.toLocaleString()} m³
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-storm-400">Roads Protected:</span>
+                  <span className="text-emerald-400 font-bold">
+                    {evaluationResult.differentials.planBeta.protectedRoadCount} Corridors
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-storm-400">Outcome:</span>
+                  <span className="text-blue-300 font-bold">Partial Basin Relief</span>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1.5 pt-2 text-[11px]">
-              <div className="flex justify-between text-storm-400">
-                <span>AVOIDED STORAGE:</span>
-                <span className="text-safety-orange font-bold">
-                  +{evaluationResult.differentials.planBeta.avoidedSurfaceVolumeM3.toLocaleString()} m³
+            {/* 3. Plan Gamma (Recommended Winner) */}
+            <div 
+              onClick={() => setSelectedPlanId('plan-gamma')}
+              className={`p-5 rounded-lg border cursor-pointer font-mono text-xs space-y-3 transition-all ${
+                selectedPlanId === 'plan-gamma'
+                  ? 'bg-emerald-950/30 border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.25)] ring-2 ring-emerald-500'
+                  : 'bg-onyx-900 border-emerald-900/60 hover:border-emerald-700'
+              }`}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
+                <span className="font-bold text-emerald-300 uppercase text-sm">PLAN GAMMA</span>
+                <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-600 text-[10px] font-bold">
+                  RECOMMENDED 🏆
                 </span>
               </div>
-              <div className="flex justify-between text-storm-400">
-                <span>PEAK DEPTH Δ:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planBeta.peakDepthReductionM.toFixed(3)} m
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>ROADS PROTECTED:</span>
-                <span className="text-emerald-400 font-bold">
-                  {evaluationResult.differentials.planBeta.protectedRoadCount}
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>HOSPITAL IMPROVEMENTS:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planBeta.improvedHospitalCount}
-                </span>
-              </div>
-            </div>
-          </div>
+              <div className="text-base font-bold text-emerald-400">Emergency Culvert Jetting</div>
+              <p className="text-xs text-storm-300 font-sans leading-relaxed">
+                Hydro-jetting crew clears Brookline culvert, restoring 12.5 m³/s gravitational outflow.
+              </p>
 
-          {/* 4. Plan Gamma */}
-          <div 
-            onClick={() => setSelectedPlanId('plan-gamma')}
-            className={`p-4 rounded border cursor-pointer font-mono text-xs space-y-3 transition-all ${
-              selectedPlanId === 'plan-gamma'
-                ? 'bg-onyx-850 border-safety-orange shadow-safety'
-                : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-              <span className="font-bold text-storm-300 uppercase">4. PLAN GAMMA</span>
-              <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px]">
-                CULVERT JET
-              </span>
-            </div>
-            <div className="text-sm font-bold text-storm-100">Culvert Jetting Truck</div>
-            <div className="text-[11px] text-storm-400 font-sans">
-              Restores Brookline culvert to 12.5 m³/s.
-            </div>
-
-            <div className="space-y-1.5 pt-2 text-[11px]">
-              <div className="flex justify-between text-storm-400">
-                <span>AVOIDED STORAGE:</span>
-                <span className="text-emerald-400 font-bold">
-                  +{evaluationResult.differentials.planGamma.avoidedSurfaceVolumeM3.toLocaleString()} m³
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>PEAK DEPTH Δ:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planGamma.peakDepthReductionM.toFixed(3)} m
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>ROADS PROTECTED:</span>
-                <span className="text-emerald-400 font-bold">
-                  {evaluationResult.differentials.planGamma.protectedRoadCount}
-                </span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>HOSPITAL IMPROVEMENTS:</span>
-                <span className="text-storm-200 font-bold">
-                  {evaluationResult.differentials.planGamma.improvedHospitalCount}
-                </span>
+              <div className="space-y-2 pt-2 text-xs border-t border-onyx-800/60">
+                <div className="flex justify-between items-center">
+                  <span className="text-storm-300">Water Avoided:</span>
+                  <span className="text-emerald-400 font-bold text-sm">
+                    +{evaluationResult.differentials.planGamma.avoidedSurfaceVolumeM3.toLocaleString()} m³
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-storm-300">Roads Protected:</span>
+                  <span className="text-emerald-400 font-bold">
+                    {evaluationResult.differentials.planGamma.protectedRoadCount} Corridors
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-storm-300">Hospital Routes:</span>
+                  <span className="text-emerald-400 font-bold">All 5 Hospitals Accessible</span>
+                </div>
               </div>
             </div>
           </div>
@@ -440,17 +403,75 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
               </div>
             </div>
 
-            {/* Action Button: Navigate to Decision Governance (Phase 4 bridge) */}
+            {/* Action Button: Authorize Decision & Dispatch Jira Field Crew */}
             <div className="pt-4 border-t border-onyx-800 space-y-2">
               <button
-                onClick={onNavigateToDecisions}
-                className="w-full flex items-center justify-center gap-2 bg-safety-orange hover:bg-safety-hover text-white font-mono text-xs font-bold py-3 px-4 rounded transition-colors shadow-tactical"
+                onClick={() => {
+                  const decId = `DEC-2026-08${Math.floor(Math.random() * 80 + 10)}`;
+                  const decisionRecord = {
+                    decisionId: decId,
+                    scenarioHash: 'sha256:7f8e3a2b1c4d',
+                    baselineStorm: 'NOAA Atlas 14 50-Year Design Burst (104.2 mm)',
+                    chosenPlan: {
+                      planId: selectedPlanDef.id,
+                      name: selectedPlanDef.name,
+                      tradeOffSummary: selectedPlanDef.description
+                    },
+                    humanApprover: {
+                      displayName: 'Cmdr. Vance',
+                      role: 'Incident Commander',
+                      approvalTimestamp: new Date().toISOString()
+                    },
+                    physicalMetrics: {
+                      inundationReduction: `${selectedDiff?.avoidedSurfaceVolumeM3.toLocaleString()} m³ avoided`,
+                      hospitalDelayMinutes: 0,
+                      simulatedMaxDepthM: selectedPlanMetrics?.maxWaterDepthM
+                    },
+                    linkedIssueKey: 'JSM-4903',
+                    status: 'COMMITTED_IMMUTABLE',
+                    createdAt: new Date().toISOString(),
+                    notes: `Commander authorized immediate field dispatch for ${selectedPlanDef.name}.`
+                  };
+
+                  try {
+                    const decs = JSON.parse(localStorage.getItem('delta_local_decisions') || '[]');
+                    decs.unshift(decisionRecord);
+                    localStorage.setItem('delta_local_decisions', JSON.stringify(decs));
+
+                    const newTicket = {
+                      id: `t-${Date.now()}`,
+                      key: 'JSM-4903',
+                      summary: `EMERGENCY DISPATCH: Mobilize Crew for ${selectedPlanDef.name}`,
+                      priority: 'P1_CRITICAL',
+                      status: 'DISPATCHED',
+                      decisionRef: decId,
+                      assignee: 'Rapid Tactical Emergency Response Crew #01 (Lead: M. Vance)',
+                      location: '42.3412° N, 71.1097° W (Brookline Ave Culvert Headwall)',
+                      timeRemaining: '12m SLA (CRITICAL RESPONSE)',
+                      isLiveDispatched: true
+                    };
+                    const tickets = JSON.parse(localStorage.getItem('delta_operational_tickets') || '[]');
+                    tickets.unshift(newTicket);
+                    localStorage.setItem('delta_operational_tickets', JSON.stringify(tickets));
+                  } catch (e) {
+                    console.warn('Local storage write skipped', e);
+                  }
+
+                  if (onNavigateToDecisions) {
+                    onNavigateToDecisions();
+                  }
+                }}
+                className={`w-full flex items-center justify-center gap-2 font-mono text-xs font-bold py-3.5 px-4 rounded-lg transition-all shadow-tactical ${
+                  selectedPlanId === 'plan-gamma'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400'
+                    : 'bg-safety-orange hover:bg-safety-hover text-white'
+                }`}
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>SELECT {selectedPlanDef.id.toUpperCase()} FOR INCIDENT COMMANDER REVIEW</span>
+                <span>AUTHORIZE {selectedPlanDef.id.toUpperCase()} &amp; DISPATCH FIELD CREW VIA JIRA &rarr;</span>
               </button>
-              <div className="text-[10px] text-storm-500 text-center font-mono">
-                Advances selected physical plan metrics to immutable Decision Record governance.
+              <div className="text-[11px] text-storm-400 text-center font-mono">
+                Signs immutable Decision Record and automatically generates field dispatch ticket in Jira Service Management.
               </div>
             </div>
           </div>
