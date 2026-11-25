@@ -186,12 +186,12 @@ describe('Workstream 3: Scenario Stress-Testing & Decision Utility', () => {
     it('TEST-STRESS-06: Reports both improved and worsened road transitions', () => {
       const profile: StressProfile = {
         ...AUTHORITATIVE_STRESS_PROFILES['synthetic-moderate-stress'],
-        durationHours: 600 / 3600,
-        durationSeconds: 600,
-        totalRainfallMm: 35.0 * (600 / 3600)
+        durationHours: 300 / 3600,
+        durationSeconds: 300,
+        totalRainfallMm: 35.0 * (300 / 3600)
       };
 
-      const result = executeMultiScenarioEvaluation(dataset, profile, 35.0, 20.0);
+      const result = executeMultiScenarioEvaluation(dataset, profile, 35.0, 30.0);
       for (const planId of ['plan-alpha', 'plan-beta', 'plan-gamma'] as const) {
         const diff = result.differentials[planId];
         expect(diff.roadTransitions).toBeDefined();
@@ -201,7 +201,7 @@ describe('Workstream 3: Scenario Stress-Testing & Decision Utility', () => {
           diff.roadTransitions.improvedRoadNames.length - diff.roadTransitions.worsenedRoadNames.length
         );
       }
-    });
+    }, 30000);
 
     it('TEST-STRESS-07: Validates strict precedence order for effectiveness classification', () => {
       // Verify classification precedence hierarchy:

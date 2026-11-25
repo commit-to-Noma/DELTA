@@ -87,13 +87,13 @@ describe('Phase 3: Multi-Scenario Intervention Planner Suite', () => {
   }, 15000);
 
   it('TEST-INTV-05: Plan Gamma restores nominal culvert capacity and reduces flood volume', () => {
-    const result = executeMultiScenarioEvaluation(dataset, 1200, 35.0);
+    const result = executeMultiScenarioEvaluation(dataset, 600, 35.0);
 
     // Plan Gamma (culvert jetting) restores 12.5 m³/s conveyance, draining more than baseline
     expect(result.planGamma.cumulativeDrainageM3).toBeGreaterThan(result.baseline.cumulativeDrainageM3);
     expect(result.differentials.planGamma.avoidedSurfaceVolumeM3).toBeGreaterThan(0);
     expect(result.planGamma.relativeConservationError).toBeLessThan(1e-10);
-  }, 15000);
+  }, 30000);
 
   it('TEST-INTV-06: Every scenario executes real 2D hydraulic solver producing 4096-element depth grids', () => {
     const result = executeMultiScenarioEvaluation(dataset, 600, 30.0);

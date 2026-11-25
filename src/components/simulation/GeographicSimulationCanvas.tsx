@@ -503,6 +503,13 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
                 const alpha = 0.40 + intensity * 0.40;
                 ctx.fillStyle = `rgba(245, 158, 11, ${alpha})`;
                 ctx.fillRect(x, y, cellSize, cellSize);
+
+                // Highlight severe adverse deflection (>= 5cm localized water rise)
+                if (delta <= -0.05) {
+                  ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+                  ctx.lineWidth = 1;
+                  ctx.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
+                }
               }
             }
           }
