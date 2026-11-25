@@ -41,60 +41,87 @@ export {
 
 const resolver = new Resolver();
 
-// Data payload definitions
-export const NOMINAL_SIMULATION_STATUS = {
-  sector: 'Boston Longwood Medical Area & Muddy River Catchment',
-  gridDimensions: '64x64 regular Cartesian (25m cell, 2.56 km²)',
-  status: 'NOMINAL_BASELINE',
-  activeDisruptions: 0,
-  inflowM3PerHour: 14250,
-  projectedWaterDepthCm: 11.4,
-  hospitalArteryStatus: 'PASSABLE',
-  monitoredFacilities: [
-    "Brigham and Women's Hospital",
-    "Boston Children's Hospital",
-    "Beth Israel Deaconess Medical Center (West Campus)",
-    "Beth Israel Deaconess Medical Center (East Campus)",
-    "Dana-Farber Cancer Institute"
-  ],
-  waterBalance: {
-    relativeConservationError: '< 1e-10',
-    modeledDrainageInlets: 3,
-    openBoundaryOutlet: 'Muddy River North Conduit'
-  }
-};
+export const SIMULATION_RUN_KEY = 'simulation:latest-run';
+export const INTERVENTIONS_EVAL_KEY = 'simulation:latest-interventions';
 
-export const CANDIDATE_INTERVENTIONS = {
-  evaluatedAgainstStorm: 'NOAA Atlas 14 100-Year 6-Hour Design Event (122.0 mm total depth)',
-  candidates: [
-    {
-      planId: 'plan-beta',
-      name: 'Plan Beta: Clear Brookline Avenue Culvert & Deploy High-Capacity Pump #1',
-      inundationReduction: '-46.2%',
-      hospitalDelayMinutes: 2.1,
-      confidence: 0.948,
-      tradeOffSummary: 'Prevents backwater surge along Brookline Ave and Francis St by restoring culvert conveyance to 12.5 m³/s.',
-      operationalRisk: 'LOW',
-      approvalRequired: 'Human Incident Commander'
-    },
-    {
-      planId: 'plan-alpha',
-      name: 'Plan Alpha: Rapid Deployable Barrier along Francis St Ambulance Route',
-      inundationReduction: '-22.5%',
-      hospitalDelayMinutes: 8.4,
-      confidence: 0.821,
-      tradeOffSummary: 'Deflects overland sheet flow locally from BWH entrance, but increases ponding depth in adjacent parking structures by 6 cm.',
-      operationalRisk: 'MEDIUM',
-      approvalRequired: 'Human Incident Commander'
-    }
-  ]
-};
+/**
+ * Persists the latest real simulation run summary into Forge KVS.
+ */
+export async function saveSimulationRun(summary, storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const record = {
+    ...summary,
+    savedAt: new Date().toISOString()
+  };
+  await client.set(SIMULATION_RUN_KEY, record);
+  return { success: true, data: record };
+}
+
+/**
+ * Retrieves the latest real simulation run summary.
+ * Returns { success: true, status: 'NO_RUN' } if no run has been executed yet,
+ * strictly preventing invented literals or placeholder numbers.
+ */
+export async function getSimulationStatus(storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const run = await client.get(SIMULATION_RUN_KEY);
+  if (!run) {
+    return {
+      success: true,
+      status: 'NO_RUN',
+      message: 'No simulation run recorded. Run a simulation in the DELTA Engine UI to compute hydraulic metrics.'
+    };
+  }
+  return {
+    success: true,
+    status: 'COMPLETED_RUN',
+    data: run
+  };
+}
+
+/**
+ * Persists evaluated candidate interventions from a solver run.
+ */
+export async function saveInterventionsEvaluation(evaluation, storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const record = {
+    ...evaluation,
+    savedAt: new Date().toISOString()
+  };
+  await client.set(INTERVENTIONS_EVAL_KEY, record);
+  return { success: true, data: record };
+}
+
+/**
+ * Retrieves candidate interventions evaluated against the baseline storm.
+ * Returns { success: true, status: 'NO_RUN' } if Phase 3 multi-plan evaluation
+ * has not been executed yet.
+ */
+export async function evaluateInterventions(storageOverride = null) {
+  const client = getStorageClient(storageOverride);
+  const evalData = await client.get(INTERVENTIONS_EVAL_KEY);
+  if (!evalData) {
+    return {
+      success: true,
+      status: 'NO_RUN',
+      message: 'No multi-scenario intervention evaluation recorded. Complete Phase 3 in DELTA Engine.'
+    };
+  }
+  return {
+    success: true,
+    status: 'COMPLETED_EVALUATION',
+    data: evalData
+  };
+}
 
 // Register for Custom UI bridge calls (camelCase and kebab-case)
-resolver.define('getSimulationStatus', async () => NOMINAL_SIMULATION_STATUS);
-resolver.define('get-simulation-status', async () => NOMINAL_SIMULATION_STATUS);
-resolver.define('evaluateInterventions', async () => CANDIDATE_INTERVENTIONS);
-resolver.define('evaluate-interventions', async () => CANDIDATE_INTERVENTIONS);
+resolver.define('getSimulationStatus', async () => await getSimulationStatus());
+resolver.define('get-simulation-status', async () => await getSimulationStatus());
+resolver.define('evaluateInterventions', async () => await evaluateInterventions());
+resolver.define('evaluate-interventions', async () => await evaluateInterventions());
+resolver.define('saveSimulationRun', async (req) => await saveSimulationRun(req?.payload || req));
+resolver.define('saveInterventionsEvaluation', async (req) => await saveInterventionsEvaluation(req?.payload || req));
+
 
 // Decision Record KVS operations (Custom UI Bridge)
 resolver.define('recordDecision', async (req) => {
@@ -153,17 +180,16 @@ export async function handler(event, context) {
   switch (actionKey) {
     case 'get-simulation-status':
     case 'getSimulationStatus':
-      return {
-        success: true,
-        data: NOMINAL_SIMULATION_STATUS
-      };
+      return await getSimulationStatus();
 
     case 'evaluate-interventions':
     case 'evaluateInterventions':
-      return {
-        success: true,
-        data: CANDIDATE_INTERVENTIONS
-      };
+      return await evaluateInterventions();
+
+    case 'save-simulation-run':
+    case 'saveSimulationRun':
+      return await saveSimulationRun(payload);
+
 
     case 'get-decision-record':
     case 'getDecisionRecord':

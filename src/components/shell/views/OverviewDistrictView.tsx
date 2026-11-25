@@ -82,7 +82,7 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
             DATA INTEGRITY PROTOCOL // ILLUSTRATIVE DISTRICT PLACEHOLDERS
           </div>
           <p className="text-storm-300 font-sans">
-            In accordance with Phase 0 specifications, actual geographical digital elevation models (DEM), culvert vectors, and real-world hospital boundaries will be ingested in Phase 1 following data licensing and district selection. The structures below represent the technical data schema.
+            In accordance with Phase 0 specifications, actual geographical digital elevation models (DEM), culvert vectors, and real-world hospital boundaries are packaged in Phase 1 following data licensing and district selection. The structures below represent the technical data schema.
           </p>
         </div>
       </div>

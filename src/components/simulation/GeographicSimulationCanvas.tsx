@@ -27,6 +27,7 @@ export interface CellHoverInfo {
 }
 
 export interface CanvasLayerVisibility {
+  satellite: boolean;
   terrain: boolean;
   contours: boolean;
   water: boolean;
@@ -58,6 +59,15 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [internalHover, setInternalHover] = useState<{ row: number; col: number } | null>(null);
+  const satelliteImgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = './usgs_satellite_still.png';
+    img.onload = () => {
+      satelliteImgRef.current = img;
+    };
+  }, []);
 
   const { nx, ny } = dataset.metadata.grid;
   const { minElevationM, maxElevationM } = dataset.metadata.elevationStatistics;
@@ -181,19 +191,27 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.fillStyle = '#080c10'; // Onyx-950
     ctx.fillRect(0, 0, width, height);
 
+    // 1b. Render Genuine USGS Satellite Imagery Still (USGS National Map Imagery Only)
+    if (activeLayers.satellite && satelliteImgRef.current) {
+      ctx.drawImage(satelliteImgRef.current, originX, originY, displaySize, displaySize);
+    }
+
     // 2. Render 64x64 Terrain Elevation Raster
     if (activeLayers.terrain) {
       for (let r = 0; r < ny; r++) {
         for (let c = 0; c < nx; c++) {
           const z = dataset.elevationMatrix[r][c];
-          ctx.fillStyle = getElevationColor(z);
+          ctx.fillStyle = activeLayers.satellite
+            ? 'rgba(0, 0, 0, 0.25)' // When satellite is active, subtle overlay
+            : getElevationColor(z);
           ctx.fillRect(originX + c * cellSize, originY + r * cellSize, cellSize + 0.4, cellSize + 0.4);
         }
       }
-    } else {
+    } else if (!activeLayers.satellite) {
       ctx.fillStyle = '#111822';
       ctx.fillRect(originX, originY, displaySize, displaySize);
     }
+
 
     // 3. Render Topographic Contour Lines (Every 5 meters)
     if (activeLayers.contours) {

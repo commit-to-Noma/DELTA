@@ -12,6 +12,10 @@ import {
   listDecisions,
   getDecisionForIssue,
   validateDecisionPayload,
+  saveSimulationRun,
+  getSimulationStatus,
+  saveInterventionsEvaluation,
+  evaluateInterventions,
   __resetInMemoryStore
 } from '../src/resolvers/index.js';
 
@@ -27,9 +31,6 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
     chosenPlan: {
       planId: 'plan-beta',
       name: 'Plan Beta: Clear Brookline Avenue Culvert & Deploy High-Capacity Pump #1',
-      inundationReduction: '-46.2%',
-      hospitalDelayMinutes: 2.1,
-      confidence: 0.948,
       tradeOffSummary: 'Prevents backwater surge along Brookline Ave and Francis St by restoring culvert conveyance to 12.5 m³/s.'
     },
     humanApprover: {
@@ -39,7 +40,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
       approvalTimestamp: '2026-11-25T08:00:00.000Z'
     },
     physicalMetrics: {
-      peakInundationDepthCm: 11.4,
+      peakInundationDepthM: 0.114,
       waterBalanceError: '< 1e-10',
       criticalAccessRoutesPassable: ['Francis St Ambulance Bay', 'Fenwood Rd Route'],
       affectedFacilities: ["Brigham and Women's Hospital"]
@@ -47,7 +48,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
     linkedIssueKey: 'EMERG-101'
   };
 
-  it('TEST-RES-01: Handles Custom UI bridge invoke for getSimulationStatus', async () => {
+  it('TEST-RES-01: Handles Custom UI bridge invoke for getSimulationStatus (returns NO_RUN when uninitialized)', async () => {
     const event = {
       call: {
         functionKey: 'getSimulationStatus',
@@ -61,13 +62,11 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
 
     const res = await handler(event, {});
     expect(res).toBeDefined();
-    expect(res.sector).toContain('Boston Longwood');
-    expect(res.gridDimensions).toContain('64x64');
-    expect(res.monitoredFacilities.length).toBe(5);
-    expect(res.waterBalance.relativeConservationError).toBe('< 1e-10');
+    expect(res.status).toBe('NO_RUN');
+    expect(res.message).toContain('No simulation run recorded');
   });
 
-  it('TEST-RES-02: Handles Custom UI bridge invoke for evaluateInterventions', async () => {
+  it('TEST-RES-02: Handles Custom UI bridge invoke for evaluateInterventions (returns NO_RUN when Phase 3 unexecuted)', async () => {
     const event = {
       call: {
         functionKey: 'evaluateInterventions',
@@ -79,13 +78,11 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
 
     const res = await handler(event, {});
     expect(res).toBeDefined();
-    expect(res.evaluatedAgainstStorm).toContain('NOAA Atlas 14');
-    expect(res.candidates.length).toBe(2);
-    expect(res.candidates[0].planId).toBe('plan-beta');
-    expect(res.candidates[0].approvalRequired).toBe('Human Incident Commander');
+    expect(res.status).toBe('NO_RUN');
+    expect(res.message).toContain('No multi-scenario intervention evaluation recorded');
   });
 
-  it('TEST-RES-03: Handles Rovo action invocation for get-simulation-status', async () => {
+  it('TEST-RES-03: Handles Rovo action invocation for get-simulation-status (truth gate: NO_RUN without hardcoded literals)', async () => {
     const rovoEvent = {
       action: {
         key: 'get-simulation-status'
@@ -95,23 +92,41 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
 
     const res = await handler(rovoEvent, {});
     expect(res.success).toBe(true);
-    expect(res.data.status).toBe('NOMINAL_BASELINE');
-    expect(res.data.monitoredFacilities).toContain("Brigham and Women's Hospital");
+    expect(res.status).toBe('NO_RUN');
+    expect(res.data).toBeUndefined();
   });
 
-  it('TEST-RES-04: Handles Rovo action invocation for evaluate-interventions', async () => {
+  it('TEST-RES-04: Returns real solver metrics when a simulation run has been saved', async () => {
+    const realRun = {
+      sector: 'Boston Longwood Medical Area (EPSG:26986)',
+      gridDimensions: '64x64 regular Cartesian (25m cell, 2.56 km²)',
+      stormId: '50-year',
+      elapsedSimulationSeconds: 7200,
+      totalWaterVolumeM3: 18450.2,
+      totalDrainedM3: 4210.8,
+      relativeConservationError: '< 1e-10',
+      maxWaterDepthM: 0.28,
+      impassableRoadsCount: 3,
+      atRiskFacilities: ["Brigham and Women's Hospital"]
+    };
+
+    await saveSimulationRun(realRun);
+
     const rovoEvent = {
       action: {
-        key: 'evaluate-interventions'
+        key: 'get-simulation-status'
       },
       payload: {}
     };
 
     const res = await handler(rovoEvent, {});
     expect(res.success).toBe(true);
-    expect(res.data.candidates.length).toBe(2);
-    expect(res.data.candidates[0].approvalRequired).toBe('Human Incident Commander');
+    expect(res.status).toBe('COMPLETED_RUN');
+    expect(res.data.maxWaterDepthM).toBe(0.28);
+    expect(res.data.impassableRoadsCount).toBe(3);
+    expect(res.data.atRiskFacilities).toContain("Brigham and Women's Hospital");
   });
+
 
   it('TEST-RES-05: Returns structured error on invalid/unrecognized action key without throwing or exposing stack traces', async () => {
     const maliciousEvent = {

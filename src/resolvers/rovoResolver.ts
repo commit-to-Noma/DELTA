@@ -3,29 +3,14 @@
  * Handles rovo:action tool invocations from the DELTA Rovo virtual agent.
  * Strictly deterministic: Rovo queries simulation state and explanations;
  * it never mutates operational state or authorizes interventions.
+ * 
+ * Truth Gate: Returns { status: 'NO_RUN' } if no run has been executed,
+ * preventing invented constants or placeholder numbers.
  */
 
 export interface RovoActionInvocation {
   actionKey: string;
   parameters: Record<string, unknown>;
-}
-
-export interface SimulationStatusResponse {
-  sector: string;
-  status: string;
-  activeDisruptions: number;
-  inflowM3PerHour: number;
-  projectedWaterDepthCm: number;
-  hospitalArteryStatus: string;
-}
-
-export interface CandidatePlanResponse {
-  planId: string;
-  name: string;
-  inundationReduction: string;
-  hospitalDelayMinutes: number;
-  confidence: number;
-  tradeOffSummary: string;
 }
 
 /**
@@ -37,41 +22,24 @@ export async function handler(event: { action?: { key: string }; payload?: Recor
   switch (actionKey) {
     case 'get-simulation-status':
       return {
-        sector: 'District Alpha (Hospital Corridor Catchment)',
-        status: 'NOMINAL_BASELINE',
-        activeDisruptions: 0,
-        inflowM3PerHour: 14250,
-        projectedWaterDepthCm: 11.4,
-        hospitalArteryStatus: 'PASSABLE',
-      } satisfies SimulationStatusResponse;
+        success: true,
+        status: 'NO_RUN',
+        message: 'No simulation run recorded. Run a simulation in the DELTA Engine UI to compute hydraulic metrics.'
+      };
 
     case 'evaluate-interventions':
       return {
-        evaluatedAgainstStorm: 'Standardized 100-Year Hydrograph (360 min)',
-        candidates: [
-          {
-            planId: 'plan-beta',
-            name: 'Plan Beta: Clear North Canal Culvert (Outfall 14) & Deploy Pump #1',
-            inundationReduction: '-46.2%',
-            hospitalDelayMinutes: 2.1,
-            confidence: 0.948,
-            tradeOffSummary: 'Prevents backwater rise along emergency route by siphoning discharge into retention basin.',
-          },
-          {
-            planId: 'plan-alpha',
-            name: 'Plan Alpha: Sandbag Perimeter along St. Jude Emergency Artery',
-            inundationReduction: '-22.5%',
-            hospitalDelayMinutes: 8.4,
-            confidence: 0.821,
-            tradeOffSummary: 'Deflects surface water locally but increases downstream pooling near commercial zone.',
-          },
-        ] satisfies CandidatePlanResponse[],
+        success: true,
+        status: 'NO_RUN',
+        message: 'No multi-scenario intervention evaluation recorded. Complete Phase 3 in DELTA Engine.'
       };
 
     default:
       return {
+        success: false,
         error: `Unrecognized action key: ${actionKey}`,
         supportedActions: ['get-simulation-status', 'evaluate-interventions'],
       };
   }
 }
+

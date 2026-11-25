@@ -30,7 +30,7 @@ interface StoredDecisionRecord {
   physicalMetrics?: {
     inundationReduction?: string;
     hospitalDelayMinutes?: number;
-    confidence?: number;
+    simulatedMaxDepthM?: number;
   };
   linkedIssueKey?: string;
   status?: string;
@@ -61,34 +61,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [writeStatus, setWriteStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ type: 'idle' });
 
-  // Default baseline demonstration records (static specs)
-  const defaultStaticRecords: DecisionRecordDisplay[] = [
-    {
-      id: 'rec-01',
-      code: 'DEC-2026-081',
-      timestamp: '2026-11-24T07:18:22Z',
-      author: 'Commander J. Vance (Incident Lead)',
-      intervention: 'Plan Beta (Clear North Canal Culvert & Deploy Pump #1)',
-      hash: 'sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069',
-      deltaSummary: '-46.2% Inundation • Hospital delay reduced to 2.1m',
-      jsmTicketId: 'JSM-4902',
-      status: 'COMMITTED_IMMUTABLE',
-      isLiveKvs: false
-    },
-    {
-      id: 'rec-02',
-      code: 'DEC-2026-080',
-      timestamp: '2026-11-23T19:42:05Z',
-      author: 'Deputy Lead M. Chen',
-      intervention: 'Plan Delta (Pre-emptive Retention Gate Release)',
-      hash: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      deltaSummary: '-18.0% Inundation • Basin level stabilized at 82%',
-      jsmTicketId: 'JSM-4889',
-      status: 'COMMITTED_IMMUTABLE',
-      isLiveKvs: false
-    },
-  ];
-
+  // Initialized empty - strictly populated from live Forge KVS queries
   const fetchKvsRecords = async () => {
     setIsLoading(true);
     try {
@@ -102,7 +75,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
           author: `${r.humanApprover?.displayName || 'Unknown Approver'} [${r.humanApprover?.role || 'Incident Commander'}]`,
           intervention: r.chosenPlan?.name || 'Authorized Flood Mitigation Plan',
           hash: r.scenarioHash || 'sha256:unspecified',
-          deltaSummary: `${r.physicalMetrics?.inundationReduction || 'N/A'} Inundation • Delay: ${r.physicalMetrics?.hospitalDelayMinutes || '0'}m`,
+          deltaSummary: `Status: ${r.status || 'COMMITTED_IMMUTABLE'}`,
           jsmTicketId: r.linkedIssueKey || 'NONE (NO OPERATIONAL DISPATCH)',
           status: r.status || 'COMMITTED_IMMUTABLE',
           isLiveKvs: true,
@@ -127,7 +100,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
     const smokePayload = {
       decisionId: 'DEC-TEST-0001',
       scenarioHash: 'sha256:test-phase-0-7-2-smoke-verification-hash',
-      baselineStorm: 'NOAA Atlas 14 100-Year 6-Hour Design Event (122.0 mm total depth) [BENCHMARK ONLY]',
+      baselineStorm: 'NOAA Atlas 14 50-Year 6-Hour Design Event (104.2 mm total depth) [BENCHMARK ONLY]',
       chosenPlan: {
         planId: 'plan-alpha',
         name: 'Plan Alpha: Rapid Deployable Barrier along Francis St Ambulance Route [BENCHMARK ONLY]',
@@ -139,9 +112,8 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
         approvalTimestamp: new Date().toISOString()
       },
       physicalMetrics: {
-        inundationReduction: '-22.5%',
-        hospitalDelayMinutes: 8.4,
-        confidence: 0.821
+        inundationReduction: 'BENCHMARK_PENDING_PHASE_3',
+        hospitalDelayMinutes: 0.0
       },
       status: 'APPROVED_BENCHMARK_ONLY',
       notes: '[TEST / BENCHMARK ONLY - NOT FOR OPERATIONAL ACTION] Phase 0.7.2 Limited KVS Smoke Test'
@@ -169,7 +141,8 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
     }
   };
 
-  const allRecords = [...kvsRecords, ...defaultStaticRecords];
+  const allRecords = kvsRecords;
+
 
   return (
     <div className="space-y-6">
@@ -255,61 +228,66 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
         </div>
 
         <div className="divide-y divide-onyx-800">
-          {allRecords.map((rec) => (
-            <div key={rec.id} className="p-5 font-mono text-xs space-y-3 hover:bg-onyx-850/50 transition-colors">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-safety-orange font-bold text-sm">{rec.code}</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] ${
-                    rec.isLiveKvs 
-                      ? 'bg-safety-muted text-safety-orange border border-safety-orange/40 font-bold' 
-                      : 'bg-emerald-950/80 border border-emerald-800 text-emerald-400'
-                  }`}>
-                    {rec.status}
-                  </span>
-                  {rec.isLiveKvs && (
-                    <span className="px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800 text-blue-300 text-[9px] uppercase font-bold">
+          {allRecords.length === 0 ? (
+            <div className="p-8 text-center text-storm-400 font-mono text-xs space-y-2">
+              <ShieldCheck className="w-8 h-8 text-storm-600 mx-auto" />
+              <div className="font-bold text-storm-200 uppercase">NO DECISION RECORDS IN FORGE KVS</div>
+              <p className="text-storm-400 max-w-md mx-auto">
+                No immutable records currently exist in live Forge App Storage.
+                Use the smoke test write above or authorize an intervention to record the first audit ledger entry.
+              </p>
+            </div>
+          ) : (
+            allRecords.map((rec) => (
+              <div key={rec.id} className="p-5 font-mono text-xs space-y-3 hover:bg-onyx-850/50 transition-colors">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-safety-orange font-bold text-sm">{rec.code}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] bg-safety-muted text-safety-orange border border-safety-orange/40 font-bold">
+                      {rec.status}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-onyx-800 border border-onyx-700 text-storm-300 text-[9px] uppercase font-bold">
                       LIVE FORGE KVS
                     </span>
-                  )}
+                  </div>
+                  <div className="text-storm-400 text-[11px]">{rec.timestamp}</div>
                 </div>
-                <div className="text-storm-400 text-[11px]">{rec.timestamp}</div>
+
+                <div className="font-sans text-sm text-storm-100 font-medium">
+                  {rec.intervention}
+                </div>
+
+                {rec.notes && (
+                  <div className="bg-onyx-950 p-2 rounded border border-onyx-800 text-[11px] text-storm-300 font-mono">
+                    {rec.notes}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-[11px] text-storm-300">
+                  <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
+                    <span className="text-storm-500 block text-[9px] uppercase">AUTHORIZING OFFICER</span>
+                    <span className="text-storm-200">{rec.author}</span>
+                  </div>
+
+                  <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
+                    <span className="text-storm-500 block text-[9px] uppercase">HYDRAULIC DELTA</span>
+                    <span className="text-storm-200 font-bold">{rec.deltaSummary}</span>
+                  </div>
+
+                  <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
+                    <span className="text-storm-500 block text-[9px] uppercase">JSM TICKET / DISPATCH</span>
+                    <span className="text-storm-400 font-bold flex items-center gap-1">
+                      {rec.jsmTicketId}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-storm-500 truncate pt-1">
+                  HASH: {rec.hash}
+                </div>
               </div>
-
-              <div className="font-sans text-sm text-storm-100 font-medium">
-                {rec.intervention}
-              </div>
-
-              {rec.notes && (
-                <div className="bg-onyx-950 p-2 rounded border border-onyx-800 text-[11px] text-amber-300 font-mono">
-                  {rec.notes}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-[11px] text-storm-300">
-                <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                  <span className="text-storm-500 block text-[9px] uppercase">AUTHORIZING OFFICER</span>
-                  <span className="text-storm-200">{rec.author}</span>
-                </div>
-
-                <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                  <span className="text-storm-500 block text-[9px] uppercase">HYDRAULIC DELTA</span>
-                  <span className="text-emerald-400 font-bold">{rec.deltaSummary}</span>
-                </div>
-
-                <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
-                  <span className="text-storm-500 block text-[9px] uppercase">JSM TICKET / DISPATCH</span>
-                  <span className="text-storm-400 font-bold flex items-center gap-1">
-                    {rec.jsmTicketId}
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-[10px] text-storm-500 truncate pt-1">
-                HASH: {rec.hash}
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>
