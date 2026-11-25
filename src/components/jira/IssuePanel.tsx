@@ -59,7 +59,7 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmittingDecision, setIsSubmittingDecision] = useState<boolean>(false);
   const [panelRationale, setPanelRationale] = useState<string>(
-    "Authorized emergency mobilization of Plan Gamma to restore nominal Brookline Ave culvert conveyance (12.5 m³/s), clearing overland backwater surge along Francis Street and protecting ambulance access to Brigham and Women's Hospital."
+    "Plan Gamma is selected for controlled validation because the simulation indicates a 22 m³ reduction in surface water storage under the specified Brookline culvert blockage scenario. The intervention restores the culvert's nominal design capacity of 12.5 m³/s. These results are screening-model outputs and do not establish real-world flood protection or guarantee hospital access. This approval is for development-environment validation only."
   );
 
   // 1. Resolve active issueKey from Forge context or prop

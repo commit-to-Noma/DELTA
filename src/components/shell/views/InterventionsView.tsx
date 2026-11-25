@@ -45,7 +45,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
   // Set default engineering rationale when plan changes
   useEffect(() => {
     if (selectedPlanId === 'plan-gamma') {
-      setEngineeringRationale('Authorized emergency mobilization of Plan Gamma to restore nominal Brookline Ave culvert conveyance (12.5 m³/s), clearing overland backwater surge along Francis Street and protecting ambulance access to Brigham and Women\'s Hospital.');
+      setEngineeringRationale('Plan Gamma is selected for controlled validation because the simulation indicates a 22 m³ reduction in surface water storage under the specified Brookline culvert blockage scenario. The intervention restores the culvert\'s nominal design capacity of 12.5 m³/s. These results are screening-model outputs and do not establish real-world flood protection or guarantee hospital access. This approval is for development-environment validation only.');
     } else if (selectedPlanId === 'plan-beta') {
       setEngineeringRationale('Authorized deployment of mobile diesel suction pump #1 at Brookline Ave culvert headwall to maintain 2.0 m³/s active dewatering and reduce peak surface ponding.');
     } else {
