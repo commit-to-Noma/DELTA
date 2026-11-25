@@ -120,7 +120,7 @@ resolver.define('getDecisionForIssue', async (req) => {
 resolver.define('createDispatchTicket', async (req) => {
   const payload = req?.payload || req;
   return await createDispatchTicket(payload, {
-    caller: req?.context?.accountId || payload?.caller,
+    caller: req?.context?.accountId || req?.context?.principal?.accountId,
     context: req?.context
   });
 });
@@ -128,7 +128,7 @@ resolver.define('createDispatchTicket', async (req) => {
 resolver.define('dispatchFieldTeam', async (req) => {
   const payload = req?.payload || req;
   return await createDispatchTicket(payload, {
-    caller: req?.context?.accountId || payload?.caller,
+    caller: req?.context?.accountId || req?.context?.principal?.accountId,
     context: req?.context
   });
 });
@@ -181,7 +181,7 @@ export async function handler(event, context) {
     case 'dispatch-field-team':
     case 'createDispatchTicket':
       return await createDispatchTicket(payload, {
-        caller: context?.accountId || payload?.caller,
+        caller: context?.accountId || context?.principal?.accountId,
         context
       });
 

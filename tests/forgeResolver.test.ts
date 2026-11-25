@@ -140,8 +140,13 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
     }
   });
 
+  const TEST_SERVER_AUTH = {
+    accountId: 'qm:commander-vance',
+    principal: { accountId: 'qm:commander-vance' }
+  };
+
   it('TEST-KVS-01: Successfully creates immutable Decision Record in KVS', async () => {
-    const res = await recordDecision(SAMPLE_DECISION);
+    const res = await recordDecision(SAMPLE_DECISION, null, TEST_SERVER_AUTH);
     expect(res.success).toBe(true);
     expect(res.data.decisionId).toBe('DEC-2026-0001');
     expect(res.data.status).toBe('APPROVED');
@@ -155,7 +160,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
   });
 
   it('TEST-KVS-02: Rejects overwriting an existing Decision Record (append-only immutability)', async () => {
-    await recordDecision(SAMPLE_DECISION);
+    await recordDecision(SAMPLE_DECISION, null, TEST_SERVER_AUTH);
 
     // Attempt to tamper with or overwrite existing record
     const tampered = {
@@ -166,7 +171,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
       }
     };
 
-    await expect(recordDecision(tampered)).rejects.toThrow(/Immutable record violation/);
+    await expect(recordDecision(tampered, null, TEST_SERVER_AUTH)).rejects.toThrow(/Immutable record violation/);
 
     // Verify original record is unchanged
     const intact = await getDecision('DEC-2026-0001');
@@ -185,7 +190,7 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
   });
 
   it('TEST-KVS-04: Links Decision Record to Jira Issue and retrieves by issue key', async () => {
-    await recordDecision(SAMPLE_DECISION);
+    await recordDecision(SAMPLE_DECISION, null, TEST_SERVER_AUTH);
 
     const issueRec = await getDecisionForIssue('EMERG-101');
     expect(issueRec.success).toBe(true);
@@ -199,12 +204,12 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
   });
 
   it('TEST-KVS-05: Lists all decisions in chronological order', async () => {
-    await recordDecision(SAMPLE_DECISION);
+    await recordDecision(SAMPLE_DECISION, null, TEST_SERVER_AUTH);
     await recordDecision({
       ...SAMPLE_DECISION,
       decisionId: 'DEC-2026-0002',
       linkedIssueKey: 'EMERG-102'
-    });
+    }, null, TEST_SERVER_AUTH);
 
     const list = await listDecisions();
     expect(list.success).toBe(true);
@@ -217,9 +222,10 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
       call: {
         functionKey: 'recordDecision',
         payload: SAMPLE_DECISION
-      }
+      },
+      context: TEST_SERVER_AUTH
     };
-    const recordRes = await handler(recordBridgeCall, {});
+    const recordRes = await handler(recordBridgeCall, TEST_SERVER_AUTH);
     expect(recordRes.success).toBe(true);
     expect(recordRes.data.decisionId).toBe('DEC-2026-0001');
 

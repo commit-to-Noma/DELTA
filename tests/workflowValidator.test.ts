@@ -56,7 +56,7 @@ describe('Jira Workflow Validator Gate Suite', () => {
   });
 
   it('TEST-VAL-02: Allows transition when issue has a verified APPROVED Decision Record', async () => {
-    await recordDecision(SAMPLE_APPROVED_DECISION);
+    await recordDecision(SAMPLE_APPROVED_DECISION, null, { accountId: 'qm:commander-ramos' });
 
     const event = {
       issue: {
@@ -81,7 +81,7 @@ describe('Jira Workflow Validator Gate Suite', () => {
       decisionId: 'DEC-2026-0089',
       status: 'SUPERSEDED',
       linkedIssueKey: 'EMERG-201'
-    });
+    }, null, { accountId: 'qm:commander-ramos' });
 
     const event = {
       issue: { key: 'EMERG-201' },

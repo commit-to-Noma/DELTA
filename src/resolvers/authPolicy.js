@@ -5,41 +5,60 @@
  * and field dispatches.
  * 
  * Policy Requirements:
- * 1. The browser is never the authority for user identity or approval privileges.
- * 2. Authenticated user identity (accountId) must originate from trusted Forge invocation context.
- * 3. User must possess explicit Incident Commander authority (e.g. membership in the designated
- *    Jira Project Role 'Incident Commanders' or designated administrative authorization).
- * 4. Fails closed if identity, project, or role membership cannot be established.
+ * 1. The browser/client is never the authority for user identity or approval privileges.
+ * 2. Authenticated user identity (accountId) must originate strictly from trusted Forge invocation context.
+ * 3. The target operational Jira project key is hard-pinned to 'EMERG' (server-controlled).
+ *    Client attempts to specify or override the project key are strictly rejected.
+ * 4. User must possess explicit Incident Commander authority via direct assignment to the
+ *    designated Jira Project Role 'Incident Commanders'.
+ * 5. Generic project administration (Administrators role) is strictly prohibited as a substitute.
+ * 6. Group-based role actors are unverified under standard Forge scopes and fail closed;
+ *    only directly assigned user actors are verified.
+ * 7. Fails closed if identity, project, or role membership cannot be established.
  */
 
 import api, { route } from '@forge/api';
 
+export const OPERATIONAL_PROJECT_KEY = 'EMERG';
 export const AUTHORIZATION_POLICY_NAME = 'Jira Project Role: Incident Commander';
 
 /**
  * Checks whether an authenticated Jira account possesses authorized Incident Commander privileges.
  * 
  * @param {object} params
- * @param {string} params.accountId - Authenticated Jira user accountId
- * @param {string} [params.projectKey] - Target Jira project key (e.g. 'EMERG')
+ * @param {string} params.accountId - Authenticated Jira user accountId from trusted Forge context
+ * @param {string} [params.projectKey] - Optional target project key; must match OPERATIONAL_PROJECT_KEY
  * @param {object} [params.customAuthPolicy] - Injected mock policy for testing/offline execution
- * @returns {Promise<{ isAuthorized: boolean, reason?: string, role?: string }>}
+ * @returns {Promise<{ isAuthorized: boolean, reason?: string, role?: string, policy?: string }>}
  */
 export async function verifyIncidentCommanderAuthorization({
   accountId,
-  projectKey = 'EMERG',
+  projectKey = OPERATIONAL_PROJECT_KEY,
   customAuthPolicy = null
 }) {
-  if (!accountId || typeof accountId !== 'string') {
+  // 1. Strict Identity Requirement: accountId must be a non-empty string
+  if (!accountId || typeof accountId !== 'string' || accountId === 'anonymous') {
     return {
       isAuthorized: false,
-      reason: 'Authentication failure: Missing or invalid accountId in server invocation context.'
+      reason: 'Authentication failure: Missing or invalid accountId in server invocation context. Client-supplied identities are strictly rejected.'
+    };
+  }
+
+  // 2. Strict Project Scoping: projectKey must be OPERATIONAL_PROJECT_KEY ('EMERG')
+  if (projectKey !== OPERATIONAL_PROJECT_KEY) {
+    return {
+      isAuthorized: false,
+      reason: `Project scope violation: Authorization is strictly confined to server-controlled project '${OPERATIONAL_PROJECT_KEY}' (received: '${projectKey}'). Client attempts to override project key are forbidden.`
     };
   }
 
   // Support injected custom authorization policy provider (used in unit testing / offline preview)
   if (customAuthPolicy) {
-    return await customAuthPolicy.verifyAuthorization({ accountId, projectKey, requiredRole: 'Incident Commander' });
+    return await customAuthPolicy.verifyAuthorization({
+      accountId,
+      projectKey: OPERATIONAL_PROJECT_KEY,
+      requiredRole: 'Incident Commander'
+    });
   }
 
   // Detect whether Forge runtime is active
@@ -58,29 +77,29 @@ export async function verifyIncidentCommanderAuthorization({
     }
     return {
       isAuthorized: false,
-      reason: `User '${accountId}' is not a designated Incident Commander for project '${projectKey}'.`
+      reason: `User '${accountId}' is not a designated Incident Commander for project '${OPERATIONAL_PROJECT_KEY}'.`
     };
   }
 
   try {
     // Live Jira Project Role Verification:
-    // Query project roles to locate the 'Incident Commanders' or 'Administrators' role
-    const rolesResp = await api.asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+    // Query project roles on the fixed operational project 'EMERG'
+    const rolesResp = await api.asApp().requestJira(route`/rest/api/3/project/${OPERATIONAL_PROJECT_KEY}/role`);
     if (!rolesResp.ok) {
       return {
         isAuthorized: false,
-        reason: `Unable to query project roles for '${projectKey}': HTTP ${rolesResp.status}. Fail-closed.`
+        reason: `Unable to query project roles for '${OPERATIONAL_PROJECT_KEY}': HTTP ${rolesResp.status}. Fail-closed.`
       };
     }
 
     const rolesMap = await rolesResp.json();
-    // Narrowest suitable policy: Check 'Incident Commanders' role first, fallback to 'Administrators'
-    const targetRoleUrl = rolesMap['Incident Commanders'] || rolesMap['DELTA Incident Commanders'] || rolesMap['Administrators'];
+    // Strictly require designated 'Incident Commanders' role. Never fallback to 'Administrators'!
+    const targetRoleUrl = rolesMap['Incident Commanders'] || rolesMap['DELTA Incident Commanders'];
 
     if (!targetRoleUrl) {
       return {
         isAuthorized: false,
-        reason: `Target authorization role not found in project '${projectKey}'. Fail-closed.`
+        reason: `Target authorization role 'Incident Commanders' not configured in project '${OPERATIONAL_PROJECT_KEY}'. Fail-closed.`
       };
     }
 
@@ -94,7 +113,7 @@ export async function verifyIncidentCommanderAuthorization({
       };
     }
 
-    const actorsResp = await api.asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+    const actorsResp = await api.asApp().requestJira(route`/rest/api/3/project/${OPERATIONAL_PROJECT_KEY}/role/${roleId}`);
     if (!actorsResp.ok) {
       return {
         isAuthorized: false,
@@ -103,15 +122,17 @@ export async function verifyIncidentCommanderAuthorization({
     }
 
     const roleData = await actorsResp.json();
-    const isMember = (roleData.actors || []).some((actor) => {
+    const actors = Array.isArray(roleData.actors) ? roleData.actors : [];
+
+    // Check direct user assignment
+    const isDirectMember = actors.some((actor) => {
       return (
         actor.actorUser?.accountId === accountId ||
-        actor.name === accountId ||
-        actor.id === accountId
+        (actor.type === 'atlassian-user-role-actor' && actor.actorUser?.accountId === accountId)
       );
     });
 
-    if (isMember) {
+    if (isDirectMember) {
       return {
         isAuthorized: true,
         role: 'Incident Commander',
@@ -119,9 +140,18 @@ export async function verifyIncidentCommanderAuthorization({
       };
     }
 
+    // Check if group-based actors are present
+    const hasGroupActors = actors.some((actor) => actor.type === 'atlassian-group-role-actor');
+    if (hasGroupActors) {
+      return {
+        isAuthorized: false,
+        reason: `User '${accountId}' is not directly assigned to role '${roleData.name || 'Incident Commanders'}'. DELTA requires direct user assignment in Project Settings; group-based role assignments cannot be verified under current permissions and fail closed for critical municipal command.`
+      };
+    }
+
     return {
       isAuthorized: false,
-      reason: `User '${accountId}' is not an assigned actor in role '${roleData.name || 'Incident Commanders'}' for project '${projectKey}'.`
+      reason: `User '${accountId}' is not an assigned actor in role '${roleData.name || 'Incident Commanders'}' for project '${OPERATIONAL_PROJECT_KEY}'.`
     };
   } catch (err) {
     return {

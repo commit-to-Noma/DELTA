@@ -10,7 +10,11 @@
  */
 
 import { kvs as forgeKvs } from '@forge/kvs';
-import { verifyIncidentCommanderAuthorization, AUTHORIZATION_POLICY_NAME } from './authPolicy.js';
+import {
+  verifyIncidentCommanderAuthorization,
+  AUTHORIZATION_POLICY_NAME,
+  OPERATIONAL_PROJECT_KEY
+} from './authPolicy.js';
 
 // Fallback in-memory map for environments where Forge KVS runtime fetch bridge is not bound (e.g. unit tests, local preview)
 const inMemoryStore = new Map();
@@ -107,11 +111,24 @@ export async function recordDecision(payload, storageOverride = null, authContex
     throw err;
   }
 
-  // Server-side Authorization & Identity Binding
-  const serverAccountId = authContext?.accountId || authContext?.context?.accountId || (typeof authContext === 'string' ? authContext : null);
+  // Server-side Authorization & Identity Binding (Strict Forge invocation context)
+  const serverAccountId =
+    authContext?.accountId ||
+    authContext?.principal?.accountId ||
+    authContext?.context?.accountId ||
+    authContext?.context?.principal?.accountId ||
+    (typeof authContext === 'string' ? authContext : null);
   const clientAccountId = payload?.humanApprover?.accountId;
 
-  if (serverAccountId && clientAccountId && serverAccountId !== clientAccountId) {
+  if (!serverAccountId || typeof serverAccountId !== 'string' || serverAccountId === 'anonymous') {
+    const err = new Error(
+      'Authentication failure: Missing or unverified Jira user identity in server invocation context. Client-provided account IDs are strictly rejected.'
+    );
+    err.code = 'UNAUTHENTICATED_SESSION';
+    throw err;
+  }
+
+  if (clientAccountId && clientAccountId !== serverAccountId) {
     const err = new Error(
       `Approver authentication mismatch: Client humanApprover accountId ('${clientAccountId}') does not match authenticated server session accountId ('${serverAccountId}').`
     );
@@ -119,8 +136,17 @@ export async function recordDecision(payload, storageOverride = null, authContex
     throw err;
   }
 
-  const authenticatedAccountId = serverAccountId || clientAccountId;
-  const projectKey = payload.linkedIssueKey ? payload.linkedIssueKey.split('-')[0] : 'EMERG';
+  // Strict Project Scoping: Must be OPERATIONAL_PROJECT_KEY ('EMERG')
+  if (payload.linkedIssueKey && !payload.linkedIssueKey.startsWith(`${OPERATIONAL_PROJECT_KEY}-`)) {
+    const err = new Error(
+      `Project scope mismatch: Linked issue '${payload.linkedIssueKey}' does not belong to server-configured project '${OPERATIONAL_PROJECT_KEY}'. Client attempts to override project key are forbidden.`
+    );
+    err.code = 'INVALID_PROJECT_SCOPE';
+    throw err;
+  }
+
+  const authenticatedAccountId = serverAccountId;
+  const projectKey = OPERATIONAL_PROJECT_KEY;
 
   // Check authorization policy
   const auth = await verifyIncidentCommanderAuthorization({
@@ -131,7 +157,7 @@ export async function recordDecision(payload, storageOverride = null, authContex
 
   if (!auth.isAuthorized) {
     const err = new Error(
-      `Incident Commander authorization denied for account '${authenticatedAccountId || 'anonymous'}': ${auth.reason || 'User lacks required role.'}`
+      `Incident Commander authorization denied for account '${authenticatedAccountId}': ${auth.reason || 'User lacks required role.'}`
     );
     err.code = 'UNAUTHORIZED_INCIDENT_COMMANDER';
     err.details = auth;

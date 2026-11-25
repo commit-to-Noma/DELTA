@@ -10,12 +10,19 @@
  * 3. State machine preventing duplicate creation under degraded/uncertain Jira states
  * 4. Server-side Incident Commander re-authorization before dispatch
  * 5. Safe recovery and state synchronization when KVS or Jira fail
+ * 
+ * NOTE: Forge KVS read-then-write does not provide atomic locking. Mutual exclusion
+ * is bounded by application design and explicit human commander approval gates.
  */
 
 import api, { route } from '@forge/api';
 import { getDecision, getStorageClient } from './decisionStorage.js';
 import { resolveDispatchLocation } from './coordinates.js';
-import { verifyIncidentCommanderAuthorization, AUTHORIZATION_POLICY_NAME } from './authPolicy.js';
+import {
+  verifyIncidentCommanderAuthorization,
+  AUTHORIZATION_POLICY_NAME,
+  OPERATIONAL_PROJECT_KEY
+} from './authPolicy.js';
 
 /**
  * Builds an Atlassian Document Format (ADF) document for Jira issue description.
@@ -25,6 +32,75 @@ export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resol
   const { equipment, priority, timeToCriticalInundation } = dispatchOrder;
   const approver = decisionRecord?.humanApprover;
   const plan = decisionRecord?.chosenPlan;
+
+  const locationBulletList = [
+    {
+      type: 'listItem',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Site Name: ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: resolvedLocation.name }
+        ]
+      }]
+    }
+  ];
+
+  if (resolvedLocation.provenanceNotice) {
+    locationBulletList.push({
+      type: 'listItem',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Staging Provenance: ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: resolvedLocation.provenanceNotice }
+        ]
+      }]
+    });
+  }
+
+  locationBulletList.push(
+    {
+      type: 'listItem',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Geodetic (WGS84): ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: resolvedLocation.wgs84Formatted }
+        ]
+      }]
+    },
+    {
+      type: 'listItem',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Projected Grid (EPSG:26986 NAD83 Massachusetts): ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: resolvedLocation.epsg26986Formatted }
+        ]
+      }]
+    },
+    {
+      type: 'listItem',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Catchment Grid Cell: ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: resolvedLocation.gridCellFormatted }
+        ]
+      }]
+    },
+    {
+      type: 'listItem',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Designated Clear Access Corridor: ', marks: [{ type: 'strong' }] },
+          { type: 'text', text: resolvedLocation.accessCorridor }
+        ]
+      }]
+    }
+  );
 
   return {
     type: 'doc',
@@ -55,58 +131,7 @@ export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resol
       },
       {
         type: 'bulletList',
-        content: [
-          {
-            type: 'listItem',
-            content: [{
-              type: 'paragraph',
-              content: [
-                { type: 'text', text: 'Site Name: ', marks: [{ type: 'strong' }] },
-                { type: 'text', text: resolvedLocation.name }
-              ]
-            }]
-          },
-          {
-            type: 'listItem',
-            content: [{
-              type: 'paragraph',
-              content: [
-                { type: 'text', text: 'Geodetic (WGS84): ', marks: [{ type: 'strong' }] },
-                { type: 'text', text: resolvedLocation.wgs84Formatted }
-              ]
-            }]
-          },
-          {
-            type: 'listItem',
-            content: [{
-              type: 'paragraph',
-              content: [
-                { type: 'text', text: 'Projected Grid (EPSG:26986 NAD83 Massachusetts): ', marks: [{ type: 'strong' }] },
-                { type: 'text', text: resolvedLocation.epsg26986Formatted }
-              ]
-            }]
-          },
-          {
-            type: 'listItem',
-            content: [{
-              type: 'paragraph',
-              content: [
-                { type: 'text', text: 'Catchment Grid Cell: ', marks: [{ type: 'strong' }] },
-                { type: 'text', text: resolvedLocation.gridCellFormatted }
-              ]
-            }]
-          },
-          {
-            type: 'listItem',
-            content: [{
-              type: 'paragraph',
-              content: [
-                { type: 'text', text: 'Designated Clear Access Corridor: ', marks: [{ type: 'strong' }] },
-                { type: 'text', text: resolvedLocation.accessCorridor }
-              ]
-            }]
-          }
-        ]
+        content: locationBulletList
       },
       {
         type: 'heading',
@@ -156,8 +181,25 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
   }
 
   // 1. Authorisation Verification: Must hold Incident Commander authority on server
-  const authenticatedCaller = caller || context?.accountId || dispatchOrder.caller;
-  const projectKey = dispatchOrder.projectKey || 'EMERG';
+  const authenticatedCaller = caller || context?.accountId;
+
+  if (!authenticatedCaller || typeof authenticatedCaller !== 'string' || authenticatedCaller === 'anonymous') {
+    const err = new Error(
+      'Dispatch authorization denied: Missing or unverified Jira user identity in server invocation context. Client-provided caller identities are strictly rejected.'
+    );
+    err.code = 'UNAUTHENTICATED_SESSION';
+    throw err;
+  }
+
+  // Strict Project Scoping: projectKey is fixed to OPERATIONAL_PROJECT_KEY ('EMERG')
+  if (dispatchOrder.projectKey && dispatchOrder.projectKey !== OPERATIONAL_PROJECT_KEY) {
+    const err = new Error(
+      `Project scope mismatch: Field dispatch is restricted to server-configured project '${OPERATIONAL_PROJECT_KEY}' (attempted override to '${dispatchOrder.projectKey}'). Client attempts to override project key are forbidden.`
+    );
+    err.code = 'INVALID_PROJECT_SCOPE';
+    throw err;
+  }
+  const projectKey = OPERATIONAL_PROJECT_KEY;
 
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: authenticatedCaller,
@@ -167,7 +209,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
 
   if (!auth.isAuthorized) {
     const err = new Error(
-      `Dispatch authorization denied for account '${authenticatedCaller || 'anonymous'}': ${auth.reason || 'User lacks Incident Commander role.'}`
+      `Dispatch authorization denied for account '${authenticatedCaller}': ${auth.reason || 'User lacks Incident Commander role.'}`
     );
     err.code = 'UNAUTHORIZED_DISPATCH';
     err.details = auth;
@@ -202,8 +244,10 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     .slice(0, 60);
   const idempotencyKey = `dispatch-record:${decision.decisionId}:${planId}`;
 
-  // 5. Inspect KVS for existing completed dispatch (Fast path)
-  const existingKvsDispatch = await client.get(idempotencyKey);
+  // 5. Inspect KVS for existing dispatch state
+  let existingKvsDispatch = await client.get(idempotencyKey);
+
+  // 5a. Completed dispatch fast-path
   if (existingKvsDispatch && existingKvsDispatch.status === 'DISPATCHED') {
     return {
       success: true,
@@ -312,17 +356,21 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     };
   }
 
-  // 6c. Inspect KVS State Machine for UNCERTAIN outcome or active in-flight lease
+  // 6c. Zero matching issues found in Jira: Inspect KVS state machine for in-flight lease or UNCERTAIN outcome
   if (existingKvsDispatch) {
+    // If state is UNCERTAIN and JQL returned 0 issues:
+    // CRITICAL: A zero-result JQL query does NOT prove ticket absence due to Jira search indexing lag.
+    // An UNCERTAIN operation must NEVER automatically proceed to another POST!
     if (existingKvsDispatch.status === 'UNCERTAIN') {
       const err = new Error(
-        `Previous dispatch attempt for operation '${operationId}' ended with an uncertain outcome (${existingKvsDispatch.error || 'timeout/connection failure'}). Automated creation blocked to prevent duplicate tickets. Manual reconciliation required.`
+        `Dispatch operation '${operationId}' is in an UNCERTAIN state (${existingKvsDispatch.error || 'unconfirmed in-flight attempt'}). JQL search returned 0 issues, but search indexing lag prevents confirming ticket absence. Automated issue creation is strictly blocked to prevent duplicate tickets. Explicit reconciliation or administrative triage is required.`
       );
       err.code = 'DISPATCH_UNCERTAIN';
       err.details = existingKvsDispatch;
       throw err;
     }
 
+    // Inspect in-flight lease:
     if (existingKvsDispatch.status === 'PENDING_CREATION') {
       const leaseAgeMs = Date.now() - new Date(existingKvsDispatch.initiatedAt).getTime();
       const LEASE_DURATION_MS = 60000; // 60-second in-flight lease
@@ -333,13 +381,32 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
         err.code = 'DISPATCH_IN_PROGRESS';
         throw err;
       }
+
+      // Lease expired (> 60s): Transition to UNCERTAIN state.
+      // An expired lease must NEVER automatically become available for another POST!
+      const expiredRecord = {
+        status: 'UNCERTAIN',
+        operationId,
+        decisionId: decision.decisionId,
+        planId,
+        error: `In-flight dispatch lease expired after ${Math.round(leaseAgeMs / 1000)}s without confirmation. Outcome ambiguous.`,
+        initiatedAt: existingKvsDispatch.initiatedAt,
+        expiredAt: new Date().toISOString()
+      };
+      await client.set(idempotencyKey, expiredRecord);
+      const err = new Error(
+        `Dispatch operation '${operationId}' lease expired after ${Math.round(leaseAgeMs / 1000)}s without confirmation. State transitioned to UNCERTAIN. Automated issue creation blocked to prevent duplicate tickets.`
+      );
+      err.code = 'DISPATCH_UNCERTAIN';
+      err.details = expiredRecord;
+      throw err;
     }
   }
 
-  // 6. Strict Coordinate Resolution & Validation (Grounded in road/drainage features)
+  // 7. Strict Coordinate Resolution & Validation (Grounded in road/drainage features)
   const resolvedLocation = resolveDispatchLocation(decision.chosenPlan, dispatchOrder.targetLocation);
 
-  // 7. Acquire In-Progress Lease
+  // 8. Acquire In-Progress Lease
   await client.set(idempotencyKey, {
     status: 'PENDING_CREATION',
     decisionId: decision.decisionId,
@@ -369,7 +436,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
   let createdIssue;
 
   try {
-    // 8. Invoke Jira REST API v3
+    // 9. Invoke Jira REST API v3
     if (!customJiraClient) {
       const hasForgeRuntime = typeof globalThis !== 'undefined' &&
         (typeof globalThis.__forge_fetch__ === 'function' || typeof globalThis.__forge_local_fetch__ === 'function');
@@ -385,8 +452,13 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
         });
 
         if (!response.ok) {
+          const status = response.status;
           const errText = await response.text();
-          throw new Error(`Jira API call failed with HTTP ${response.status}: ${errText}`);
+          const err = new Error(`Jira API call failed with HTTP ${status}: ${errText}`);
+          err.status = status;
+          err.isClientError = status >= 400 && status < 500;
+          err.isAmbiguous = status >= 500;
+          throw err;
         }
 
         const created = await response.json();
@@ -410,29 +482,38 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       createdIssue = { key: result.key, id: result.id, self: result.self };
     }
   } catch (jiraErr) {
-    const isTimeoutOrAbort =
-      jiraErr.name === 'AbortError' ||
-      /timeout|timed out|ECONNRESET|ETIMEDOUT|504/i.test(jiraErr.message || '');
+    // Distinguish deterministic client rejections from ambiguous transport/gateway failures
+    const isDeterministicClientError = jiraErr.status >= 400 && jiraErr.status < 500;
+    const isAmbiguousTransportOrServer =
+      !isDeterministicClientError && (
+        jiraErr.isAmbiguous ||
+        jiraErr.name === 'AbortError' ||
+        jiraErr.name === 'TimeoutError' ||
+        jiraErr.status >= 500 ||
+        /timeout|timed out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EPIPE|UND_ERR_|fetch failed|502|503|504|Gateway|Service Unavailable/i.test(
+          jiraErr.message || ''
+        )
+      );
 
-    if (isTimeoutOrAbort) {
+    if (isAmbiguousTransportOrServer) {
       // Mark state as UNCERTAIN so subsequent retries do not blindly duplicate
       await client.set(idempotencyKey, {
         status: 'UNCERTAIN',
         operationId,
         decisionId: decision.decisionId,
         planId,
-        error: jiraErr.message,
+        error: jiraErr.message || 'Ambiguous transport/gateway failure',
         timestamp: new Date().toISOString()
       });
       const err = new Error(
-        `Jira dispatch request timed out with uncertain creation outcome. Operation '${operationId}' marked UNCERTAIN to prevent duplicate creation.`
+        `Jira dispatch request encountered an ambiguous network or gateway failure (${jiraErr.message}). Operation '${operationId}' marked UNCERTAIN to prevent duplicate creation.`
       );
       err.code = 'DISPATCH_UNCERTAIN';
       err.originalError = jiraErr;
       throw err;
     }
 
-    // Deterministic API failure: clean up in-progress lease so future attempts can retry safely
+    // Deterministic API failure (e.g. HTTP 400 Bad Request, missing field): clean up in-progress lease
     try {
       await client.delete(idempotencyKey);
     } catch (_) {
@@ -444,7 +525,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     throw err;
   }
 
-  // 9. Persist Completed Dispatch Record into KVS
+  // 10. Persist Completed Dispatch Record into KVS
   const dispatchedAt = new Date().toISOString();
   const completedRecord = {
     status: 'DISPATCHED',

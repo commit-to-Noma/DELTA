@@ -8,6 +8,8 @@
  * boundary validation, and authoritative intervention location resolution.
  */
 
+import { DERIVED_PLAN_ALPHA_LOCATION } from '../data/interventionSites.js';
+
 // -------------------------------------------------------------
 // EPSG:26986 (NAD83 / Massachusetts Mainland) Projection Engine
 // Standard Lambert Conformal Conic (2SP) with GRS80 Ellipsoid
@@ -91,19 +93,8 @@ export const AUTHORITATIVE_INTERVENTION_LOCATIONS = {
     accessCorridor: 'Longwood Ave → Brookline Ave South (Francis St ambulance approach clear)'
   },
   // Plan Alpha: Rapid deployable barrier along Francis Street roadway protecting BWH ambulance access
-  // Grounded in OSM road feature ROAD-1377084984 (secondary municipal road corridor directly fronting emergency bay)
-  'plan-alpha': {
-    siteId: 'ROAD-1377084984',
-    name: 'Francis Street Emergency Barrier Line (OSM Way 1377084984)',
-    facilityCategory: 'Municipal Roadway Flood Barrier Staging Corridor',
-    projected: { x: 232384.06, y: 898414.94 },
-    wgs84: { lat: 42.33556, lon: -71.10704 },
-    gridCell: [43, 29],
-    featureType: 'road_segment',
-    featureId: 'ROAD-1377084984',
-    osmId: 1377084984,
-    accessCorridor: 'Huntington Ave → Francis St / Shattuck St ambulance approach'
-  },
+  // Derived programmatically from OSM road feature ROAD-1377084984 (Francis St secondary corridor fronting emergency bay)
+  'plan-alpha': DERIVED_PLAN_ALPHA_LOCATION,
   // Plan Gamma / Choke: Fenway Emerald Necklace restriction point
   'plan-gamma': {
     siteId: 'CULVERT-02-FENWAY-CHOKE',
@@ -276,7 +267,9 @@ export function validateAndReconcileLocation(loc) {
     gridCellFormatted: `[Row ${row}, Col ${col}]`,
     accessCorridor: loc.accessCorridor || 'Primary Municipal Artery',
     featureType: loc.featureType || 'custom_location',
-    featureId: loc.featureId || undefined
+    featureId: loc.featureId || undefined,
+    provenanceNotice: loc.provenanceNotice || undefined,
+    isModelledStagingPoint: loc.isModelledStagingPoint || undefined
   };
 }
 
@@ -309,7 +302,9 @@ export function resolveDispatchLocation(chosenPlan, orderLocationOverride = null
       lon: auth.wgs84.lon,
       accessCorridor: auth.accessCorridor,
       featureType: auth.featureType,
-      featureId: auth.featureId
+      featureId: auth.featureId,
+      provenanceNotice: auth.provenanceNotice,
+      isModelledStagingPoint: auth.isModelledStagingPoint
     });
   }
 
