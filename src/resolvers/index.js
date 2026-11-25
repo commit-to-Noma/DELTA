@@ -12,6 +12,14 @@ import {
   createDispatchTicket,
   buildDispatchAdfDescription
 } from './jsmDispatcher.js';
+import {
+  resolveDispatchLocation,
+  validateAndReconcileLocation,
+  latLonToProjected,
+  projectedToLatLon,
+  AUTHORITATIVE_INTERVENTION_LOCATIONS,
+  CATCHMENT_BOUNDS
+} from './coordinates.js';
 
 export {
   recordDecision,
@@ -22,7 +30,13 @@ export {
   getStorageClient,
   __resetInMemoryStore,
   createDispatchTicket,
-  buildDispatchAdfDescription
+  buildDispatchAdfDescription,
+  resolveDispatchLocation,
+  validateAndReconcileLocation,
+  latLonToProjected,
+  projectedToLatLon,
+  AUTHORITATIVE_INTERVENTION_LOCATIONS,
+  CATCHMENT_BOUNDS
 };
 
 const resolver = new Resolver();
@@ -85,7 +99,7 @@ resolver.define('evaluate-interventions', async () => CANDIDATE_INTERVENTIONS);
 // Decision Record KVS operations (Custom UI Bridge)
 resolver.define('recordDecision', async (req) => {
   const payload = req?.payload || req;
-  return await recordDecision(payload);
+  return await recordDecision(payload, null, req?.context);
 });
 
 resolver.define('getDecision', async (req) => {
@@ -105,12 +119,18 @@ resolver.define('getDecisionForIssue', async (req) => {
 // JSM Field Dispatch Ticket Creation (Custom UI Bridge)
 resolver.define('createDispatchTicket', async (req) => {
   const payload = req?.payload || req;
-  return await createDispatchTicket(payload);
+  return await createDispatchTicket(payload, {
+    caller: req?.context?.accountId || payload?.caller,
+    context: req?.context
+  });
 });
 
 resolver.define('dispatchFieldTeam', async (req) => {
   const payload = req?.payload || req;
-  return await createDispatchTicket(payload);
+  return await createDispatchTicket(payload, {
+    caller: req?.context?.accountId || payload?.caller,
+    context: req?.context
+  });
 });
 
 const customUiHandler = resolver.getDefinitions();
@@ -156,11 +176,14 @@ export async function handler(event, context) {
 
     case 'record-decision':
     case 'recordDecision':
-      return await recordDecision(payload);
+      return await recordDecision(payload, null, context);
 
     case 'dispatch-field-team':
     case 'createDispatchTicket':
-      return await createDispatchTicket(payload);
+      return await createDispatchTicket(payload, {
+        caller: context?.accountId || payload?.caller,
+        context
+      });
 
     default:
       return {

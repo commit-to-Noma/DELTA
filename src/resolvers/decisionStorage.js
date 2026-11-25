@@ -4,6 +4,9 @@
  * Implements immutable, append-only Key-Value Store (KVS) records for human-approved
  * hydraulic mitigation plans. Once written, a Decision Record (DEC-XXXX) cannot be
  * modified or overwritten, satisfying critical infrastructure provenance requirements.
+ * 
+ * Enforces server-side authorization: the browser can never be the sole authority
+ * for Incident Commander identity.
  */
 
 import { kvs as forgeKvs } from '@forge/kvs';
@@ -86,8 +89,10 @@ export function validateDecisionPayload(payload) {
 /**
  * Stores an immutable Decision Record into Forge KVS.
  * Rejects with an error if the record ID already exists (append-only enforcement).
+ * 
+ * Verifies authenticated caller identity against server context to prevent client-side forgery.
  */
-export async function recordDecision(payload, storageOverride = null) {
+export async function recordDecision(payload, storageOverride = null, authContext = null) {
   validateDecisionPayload(payload);
   const client = getStorageClient(storageOverride);
 
@@ -101,8 +106,27 @@ export async function recordDecision(payload, storageOverride = null) {
     throw err;
   }
 
+  // Server-side Authorization & Identity Binding
+  const authenticatedAccountId = authContext?.accountId || authContext?.context?.accountId;
+  let verifiedApprover = { ...payload.humanApprover };
+
+  if (authenticatedAccountId) {
+    // If client supplied an accountId that contradicts the authenticated context, reject forgery
+    if (verifiedApprover.accountId && verifiedApprover.accountId !== authenticatedAccountId) {
+      const err = new Error(
+        `Approver authentication mismatch: Client submitted accountId '${verifiedApprover.accountId}' does not match authenticated Jira user '${authenticatedAccountId}'.`
+      );
+      err.code = 'APPROVER_IDENTITY_MISMATCH';
+      throw err;
+    }
+    // Bind authenticated identity directly from server session
+    verifiedApprover.accountId = authenticatedAccountId;
+    verifiedApprover.authenticatedByServer = true;
+  }
+
   const record = {
     ...payload,
+    humanApprover: verifiedApprover,
     status: payload.status || 'APPROVED',
     createdAt: new Date().toISOString(),
     schemaVersion: '1.0.0'

@@ -19,7 +19,20 @@
 - [x] **0.5.3 Forge Entry Point Alignment**: Configured `src/App.tsx` to default directly into the operational application shell, keeping the landing page accessible via `?view=landing`. *(Committed: fdb6fd5)*
 - [x] **0.5.4 Spike A (Forge Custom UI & Manifest)**: Defined `manifest.yml` with `jira:projectPage`, nodejs22.x runtime. Registered app (`7c4b604a-2340-4df7-8c0a-8fd8e44b7a12`), deployed to development, and installed onto live Jira tenant `nomathembancube2005.atlassian.net`. Verified `forge eligibility` passing for Runs on Atlassian.
 - [x] **0.5.5 Spike B.1 (Rovo Manifest & Resolver Scaffolding)**: Declared `rovo:agent` and `action` modules with `actionVerb: GET`, verified with 0 lint errors, and deployed dual-mode resolver handler in `src/resolvers/index.js` (6 unit tests passing).
-- [ ] **0.5.6 Spike B.2 (Empirical Live Jira Verification)**: Live testing on development Jira site: Rovo agent response in Jira chat window, Forge KVS storage read/write, minimal workflow validator gate blocking a transition, and JSM ticket creation.
+- [x] **0.5.6 Spike B.2 Empirical Rovo Verification**: Confirmed Rovo Chat is unprovisioned on development tenant (`nomathembancube2005.atlassian.net`); pivoted primary operational path to native Jira workflow, KVS storage, and proactive gates per Forge leadership guidance.
+
+---
+
+## [x] Phase 0.6: Operational Integration Audit
+- [x] **0.6.1 Technical Integration Audit**: Conducted read-only technical audit of version 2.5.0 deployment across coordinate integrity, hydraulic solver terminology, Forge KVS, workflow validator, and JSM dispatcher. Documented exact defects and mock-vs-live reality in `PHASE_0_6_INTEGRATION_AUDIT.md`.
+
+---
+
+## [ ] Phase 0.7: Dispatch Integrity and Live Integration
+- [x] **0.7.1 Dispatch Integrity & Idempotency Correction**: Eradicated out-of-domain coordinates; implemented `src/resolvers/coordinates.js` deriving exact locations from authoritative dataset features with bounds & consistency validation. Implemented dispatch idempotency with concurrent in-flight leases, failure recovery, and server-side approver verification in `src/resolvers/jsmDispatcher.js` and `src/resolvers/decisionStorage.js`. Verified with 15 automated tests (total 67/67 suite tests passing). Deployed version 2.6.0. Documented in `TASK_0_7_1_DISPATCH_INTEGRITY.md`.
+- [ ] **0.7.2 Live KVS Smoke Test**: Persist a real decision record to live Forge KVS, verify retrieval on reload, and verify issue linkage.
+- [ ] **0.7.3 Live Workflow Validator**: Bind validator to a test Jira transition and verify blocking without approved decision and passing with approval.
+- [ ] **0.7.4 Live JSM Dispatch**: Generate a real test dispatch ticket in Jira Cloud and verify ADF formatting and coordinates.
 
 ---
 
