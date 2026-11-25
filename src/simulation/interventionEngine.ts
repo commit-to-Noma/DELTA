@@ -53,6 +53,9 @@ export interface ScenarioRunMetrics {
   name: string;
   totalWaterVolumeM3: number;
   cumulativeDrainageM3: number;
+  cumulativeInfiltrationM3: number;
+  cumulativeBoundaryOutflowM3: number;
+  massBalanceErrorM3: number;
   currentStorageM3: number;
   maxWaterDepthM: number;
   impassableRoadCount: number;
@@ -61,6 +64,7 @@ export interface ScenarioRunMetrics {
   roads: RoadPassabilityImpact[];
   waterDepth: Float64Array;
   relativeConservationError: number;
+  drainageByInletId: Record<string, number>;
 }
 
 export interface HospitalImprovement {
@@ -70,6 +74,34 @@ export interface HospitalImprovement {
   transition: 'ISOLATED_TO_CAUTION' | 'ISOLATED_TO_ACCESSIBLE' | 'CAUTION_TO_ACCESSIBLE' | 'UNCHANGED';
 }
 
+export type EffectivenessClassification =
+  | 'ADVERSE_LOCAL_DEFLECTION'
+  | 'CAPACITY_CONSTRAINED'
+  | 'MEASURABLE_BENEFIT'
+  | 'NEGLIGIBLE_IMPACT'
+  | 'INCONCLUSIVE_NO_EFFECTIVE_PLAN';
+
+export interface SpatialDeflectionMetrics {
+  adverseCellCount: number; // Cells where deltaWaterDepthM < -0.01m (plan has >1cm more water than baseline)
+  adverseAreaM2: number;    // adverseCellCount * 625 m²
+  maxAdverseDepthIncreaseM: number; // Max local water rise caused by plan (m)
+  deflectedVolumeM3: number; // Integrated volume of deflected water on adverse cells (m³)
+}
+
+export interface InletDrainageAccounting {
+  totalCatchmentDrainageM3: number;
+  backgroundInletDrainageM3: number; // Fenway choke + Longwood sump
+  interventionSinkExtractionM3: number; // Mobile pump at [17,25] or culvert point sink at [17,26]
+  incrementalDrainageM3: number; // plan total drainage minus baseline total drainage
+  avoidedSurfaceStorageM3: number; // baseline currentStorage minus plan currentStorage
+}
+
+export interface RoadTransitionSummary {
+  improvedRoadNames: string[]; // Transitioned from IMPASSABLE (>=30cm) to PASSABLE/CAUTION (<30cm)
+  worsenedRoadNames: string[]; // Transitioned from PASSABLE/CAUTION to IMPASSABLE (>=30cm)
+  netProtectedRoadCount: number; // improved - worsened
+}
+
 export interface PlanDifferential {
   planId: string;
   name: string;
@@ -77,8 +109,36 @@ export interface PlanDifferential {
   peakDepthReductionM: number;   // d_max,baseline - d_max,plan (+ indicates peak lowered)
   protectedRoadCount: number;     // Roads transitioning from IMPASSABLE to PASSABLE
   protectedRoadNames: string[];
+  roadTransitions: RoadTransitionSummary;
   hospitalImprovements: HospitalImprovement[];
   improvedHospitalCount: number;
+  spatialDeflection: SpatialDeflectionMetrics;
+  inletDrainageAccounting: InletDrainageAccounting;
+  classification: EffectivenessClassification;
+  classificationRationale: string;
+}
+
+export interface StressProfile {
+  id: string;
+  name: string;
+  type: 'REGIONAL_NOAA_BENCHMARK' | 'SYNTHETIC_STRESS_INPUT';
+  durationHours: number;
+  durationSeconds: number;
+  totalRainfallMm: number;
+  rainfallIntensityMmPerHour?: number;
+  hyetographHours?: { hourIndex: number; startHour: number; endHour: number; depthMm: number; rateMmPerHour: number }[];
+  initialConditionsDescription: string;
+  provenance: string;
+  disclosures: string[];
+}
+
+export interface EvidenceBasedComparison {
+  keyFindings: string[];
+  tradeOffs: string[];
+  capacityLimitations: string[];
+  overallAssessment: string;
+  recommendedPlanId: string | null;
+  recommendationRationale: string;
 }
 
 export interface MultiScenarioEvaluationResult {
@@ -100,13 +160,20 @@ export interface MultiScenarioEvaluationResult {
     recommendedPlanId: string;
     recommendationRationale: string;
   };
+  comparison: EvidenceBasedComparison;
   simulationMetadata: {
+    profileId: string;
+    profileLabel: string;
+    profileType: 'REGIONAL_NOAA_BENCHMARK' | 'SYNTHETIC_STRESS_INPUT';
     stormId: string;
     stormLabel: string;
     simulatedDurationSeconds: number;
     rainfallIntensityMmPerHour: number;
+    totalRainfallMm: number;
     disruptionId: string;
     timestamp: string;
+    provenance: string;
+    disclosures: string[];
   };
 }
 
@@ -158,24 +225,114 @@ export const AUTHORITATIVE_INTERVENTIONS: Record<'plan-alpha' | 'plan-beta' | 'p
 };
 
 /**
- * Executes a single simulation run given a configuration and storm settings.
+ * Authoritative Library of Rainfall Stress Profiles.
+ * Includes 1 Regional NOAA Atlas 14 Benchmark (Reference Case) and 3 Synthetic Exploratory Stress Profiles.
+ */
+export const AUTHORITATIVE_STRESS_PROFILES: Record<string, StressProfile> = {
+  'reference-noaa-50yr': {
+    id: 'reference-noaa-50yr',
+    name: 'NOAA Atlas 14 50-Year 6-Hour Regional Benchmark (Station 19-0770, 104.2 mm)',
+    type: 'REGIONAL_NOAA_BENCHMARK',
+    durationHours: 6.0,
+    durationSeconds: 21600,
+    totalRainfallMm: 104.2,
+    hyetographHours: [
+      { hourIndex: 0, startHour: 0, endHour: 1, depthMm: 9.8944, rateMmPerHour: 9.8944 },
+      { hourIndex: 1, startHour: 1, endHour: 2, depthMm: 19.7887, rateMmPerHour: 19.7887 },
+      { hourIndex: 2, startHour: 2, endHour: 3, depthMm: 34.9392, rateMmPerHour: 34.9392 },
+      { hourIndex: 3, startHour: 3, endHour: 4, depthMm: 23.4991, rateMmPerHour: 23.4991 },
+      { hourIndex: 4, startHour: 4, endHour: 5, depthMm: 11.1312, rateMmPerHour: 11.1312 },
+      { hourIndex: 5, startHour: 5, endHour: 6, depthMm: 4.9474, rateMmPerHour: 4.9474 }
+    ],
+    initialConditionsDescription: 'Dry bare-earth terrain (initial water depth h = 0.0 m across all 4096 cells)',
+    provenance: 'NOAA Atlas 14 Volume 10 Version 3 point precipitation frequency estimate for Boston Logan Airport (Station 19-0770, 42.3606°N, -71.0106°W), approximately 3 km northeast of the Longwood catchment.',
+    disclosures: [
+      'Regional meteorological benchmark: derived from Boston Logan Station 19-0770 data (~3 km NE of Longwood). Provided as a regional comparison benchmark, not a localized catchment-specific rainfall frequency curve.',
+      'Discrete 6-hour temporal distribution normalized so that hourly depths sum exactly to 104.2 mm (peak intensity 34.9 mm/h in Hour 3).'
+    ]
+  },
+  'synthetic-low-intensity': {
+    id: 'synthetic-low-intensity',
+    name: 'Synthetic Low-Intensity Stress (15 mm/h, 1 Hour, 15.0 mm Total)',
+    type: 'SYNTHETIC_STRESS_INPUT',
+    durationHours: 1.0,
+    durationSeconds: 3600,
+    totalRainfallMm: 15.0,
+    rainfallIntensityMmPerHour: 15.0,
+    initialConditionsDescription: 'Dry bare-earth terrain (initial water depth h = 0.0 m across all 4096 cells)',
+    provenance: 'Synthetic exploratory stress profile representing steady light-to-moderate precipitation.',
+    disclosures: [
+      'Synthetic stress scenario: constant 15.0 mm/h rate over 1.0 hour. Not derived from frequency statistics or return-period data.',
+      'Used to test the lower sensitivity threshold where surface ponding may be insufficient for interventions to provide measurable benefit.'
+    ]
+  },
+  'synthetic-moderate-stress': {
+    id: 'synthetic-moderate-stress',
+    name: 'Synthetic Moderate Stress (35 mm/h, 1 Hour, 35.0 mm Total)',
+    type: 'SYNTHETIC_STRESS_INPUT',
+    durationHours: 1.0,
+    durationSeconds: 3600,
+    totalRainfallMm: 35.0,
+    rainfallIntensityMmPerHour: 35.0,
+    initialConditionsDescription: 'Dry bare-earth terrain (initial water depth h = 0.0 m across all 4096 cells)',
+    provenance: 'Synthetic exploratory stress profile testing arterial ponding and localized road passability thresholds.',
+    disclosures: [
+      'Synthetic stress scenario: constant 35.0 mm/h rate over 1.0 hour. Not an officially calibrated municipal design burst.',
+      'Used to evaluate performance under intermediate overland sheet flow and compare mobile pump removal against culvert point-sink drainage.'
+    ]
+  },
+  'synthetic-high-intensity': {
+    id: 'synthetic-high-intensity',
+    name: 'Synthetic High-Intensity Stress (75 mm/h, 30 Min, 37.5 mm Total)',
+    type: 'SYNTHETIC_STRESS_INPUT',
+    durationHours: 0.5,
+    durationSeconds: 1800,
+    totalRainfallMm: 37.5,
+    rainfallIntensityMmPerHour: 75.0,
+    initialConditionsDescription: 'Dry bare-earth terrain (initial water depth h = 0.0 m across all 4096 cells)',
+    provenance: 'Synthetic exploratory overload stress profile testing hydraulic capacity constraints and barrier surcharge.',
+    disclosures: [
+      'Synthetic stress scenario: constant 75.0 mm/h rate over 30 minutes. Not an official cloudburst event.',
+      'Used to test operational boundaries where mobile pumps (2.0 m³/s) become capacity-constrained against high overland inflow.'
+    ]
+  }
+};
+
+/**
+ * Computes instantaneous rainfall intensity (mm/h) at a specific elapsed simulation time.
+ */
+export function getRainfallRateAtElapsed(profile: StressProfile, elapsedSeconds: number): number {
+  if (elapsedSeconds >= profile.durationSeconds) return 0.0;
+  if (profile.hyetographHours && profile.hyetographHours.length > 0) {
+    const hourIdx = Math.min(
+      profile.hyetographHours.length - 1,
+      Math.floor(elapsedSeconds / 3600)
+    );
+    return profile.hyetographHours[hourIdx].rateMmPerHour;
+  }
+  return profile.rainfallIntensityMmPerHour ?? (profile.totalRainfallMm / profile.durationHours);
+}
+
+/**
+ * Executes a single simulation run given a configuration and stress profile.
  */
 function runSingleScenario(
   dataset: BostonCatchmentDataset,
   config: HydraulicGridConfig,
   scenarioId: string,
   scenarioName: string,
-  simulatedSeconds: number,
-  rainfallRateMmPerHour: number,
+  profile: StressProfile,
   dtMacro: number = 20.0
 ): ScenarioRunMetrics {
   let state = createHydraulicState(config);
-  const numSteps = Math.max(1, Math.floor(simulatedSeconds / dtMacro));
+  const numSteps = Math.max(1, Math.floor(profile.durationSeconds / dtMacro));
 
   for (let s = 0; s < numSteps; s++) {
+    const elapsed = s * dtMacro;
+    const currentRate = getRainfallRateAtElapsed(profile, elapsed);
     state = stepHydraulics(state, {
       dtMacroSeconds: dtMacro,
-      rainfallRateMmPerHour
+      rainfallRateMmPerHour: currentRate
     });
   }
 
@@ -198,6 +355,9 @@ function runSingleScenario(
     name: scenarioName,
     totalWaterVolumeM3: Math.round(state.accounting.cumulativeRainfallM3),
     cumulativeDrainageM3: Math.round(state.accounting.cumulativeDrainageM3),
+    cumulativeInfiltrationM3: Math.round(state.accounting.cumulativeInfiltrationM3),
+    cumulativeBoundaryOutflowM3: Math.round(state.accounting.cumulativeBoundaryOutflowM3),
+    massBalanceErrorM3: state.accounting.massBalanceErrorM3,
     currentStorageM3: Math.round(state.accounting.currentStorageM3),
     maxWaterDepthM: Math.round(maxWaterDepthM * 1000) / 1000,
     impassableRoadCount,
@@ -205,7 +365,8 @@ function runSingleScenario(
     hospitals,
     roads,
     waterDepth: state.waterDepth,
-    relativeConservationError: state.accounting.relativeError
+    relativeConservationError: state.accounting.relativeError,
+    drainageByInletId: state.accounting.drainageByInletId || {}
   };
 }
 
@@ -215,28 +376,47 @@ function runSingleScenario(
 function computePlanDifferential(
   baseline: ScenarioRunMetrics,
   plan: ScenarioRunMetrics,
-  planDef: InterventionDefinition
+  planDef: InterventionDefinition,
+  profile: StressProfile
 ): PlanDifferential {
+  const cellArea = 625.0; // 25m * 25m
+
   // A. Avoided surface flood volume: V_baseline - V_plan
   const avoidedSurfaceVolumeM3 = Math.round(baseline.currentStorageM3 - plan.currentStorageM3);
 
   // B. Peak depth reduction: d_max,baseline - d_max,plan
   const peakDepthReductionM = Math.round((baseline.maxWaterDepthM - plan.maxWaterDepthM) * 1000) / 1000;
 
-  // C. Protected roads: impassable in baseline, but passable in plan
-  const baselineImpassableMap = new Map<string, RoadPassabilityImpact>();
+  // C. Road passability transitions (both improved and worsened)
+  const baselineRoadMap = new Map<string, RoadPassabilityImpact>();
   for (const r of baseline.roads) {
-    if (r.status === 'CRITICAL_IMPASSABLE') {
-      baselineImpassableMap.set(r.roadId, r);
+    baselineRoadMap.set(r.roadId, r);
+  }
+
+  const improvedRoadNames: string[] = [];
+  const worsenedRoadNames: string[] = [];
+
+  for (const pr of plan.roads) {
+    const br = baselineRoadMap.get(pr.roadId);
+    if (!br) continue;
+    const baseImpassable = br.status === 'CRITICAL_IMPASSABLE';
+    const planImpassable = pr.status === 'CRITICAL_IMPASSABLE';
+
+    if (baseImpassable && !planImpassable) {
+      improvedRoadNames.push(pr.name);
+    } else if (!baseImpassable && planImpassable) {
+      worsenedRoadNames.push(pr.name);
     }
   }
 
-  const protectedRoadNames: string[] = [];
-  for (const r of plan.roads) {
-    if (baselineImpassableMap.has(r.roadId) && r.status !== 'CRITICAL_IMPASSABLE') {
-      protectedRoadNames.push(r.name);
-    }
-  }
+  const protectedRoadCount = improvedRoadNames.length;
+  const netProtectedRoadCount = improvedRoadNames.length - worsenedRoadNames.length;
+
+  const roadTransitions: RoadTransitionSummary = {
+    improvedRoadNames,
+    worsenedRoadNames,
+    netProtectedRoadCount
+  };
 
   // D. Hospital improvements: transitions between status levels
   const hospitalImprovements: HospitalImprovement[] = [];
@@ -266,28 +446,279 @@ function computePlanDifferential(
     });
   }
 
+  // E. Spatial deflection accounting (Local adverse increases: delta < -0.01m)
+  let adverseCellCount = 0;
+  let maxAdverseDepthIncreaseM = 0;
+  let deflectedVolumeM3 = 0;
+
+  for (let i = 0; i < baseline.waterDepth.length; i++) {
+    const baseD = baseline.waterDepth[i];
+    const planD = plan.waterDepth[i];
+    const delta = baseD - planD; // positive: drawdown; negative: local increase
+
+    if (delta < -0.01) {
+      adverseCellCount++;
+      const adverseRise = -delta;
+      if (adverseRise > maxAdverseDepthIncreaseM) {
+        maxAdverseDepthIncreaseM = adverseRise;
+      }
+      deflectedVolumeM3 += adverseRise * cellArea;
+    }
+  }
+
+  const spatialDeflection: SpatialDeflectionMetrics = {
+    adverseCellCount,
+    adverseAreaM2: adverseCellCount * cellArea,
+    maxAdverseDepthIncreaseM: Math.round(maxAdverseDepthIncreaseM * 1000) / 1000,
+    deflectedVolumeM3: Math.round(deflectedVolumeM3)
+  };
+
+  // F. Inlet-Specific Drainage Accounting
+  const totalCatchmentDrainageM3 = Math.round(plan.cumulativeDrainageM3);
+  const planInlets = plan.drainageByInletId || {};
+  const fenwayDrain = planInlets['CULVERT-02-FENWAY-CHOKE'] || 0;
+  const longwoodDrain = planInlets['DRAIN-03-LONGWOOD-WEST'] || 0;
+  const backgroundInletDrainageM3 = Math.round(fenwayDrain + longwoodDrain);
+
+  let interventionSinkExtractionM3 = 0;
+  if (planDef.id === 'plan-beta') {
+    interventionSinkExtractionM3 = Math.round(planInlets['PUMP-BETA-MOBILE'] || 0);
+  } else if (planDef.id === 'plan-gamma') {
+    interventionSinkExtractionM3 = Math.round(planInlets['CULVERT-01-BROOKLINE'] || 0);
+  }
+
+  const incrementalDrainageM3 = Math.round(plan.cumulativeDrainageM3 - baseline.cumulativeDrainageM3);
+  const avoidedSurfaceStorageM3 = avoidedSurfaceVolumeM3;
+
+  const inletDrainageAccounting: InletDrainageAccounting = {
+    totalCatchmentDrainageM3,
+    backgroundInletDrainageM3,
+    interventionSinkExtractionM3,
+    incrementalDrainageM3,
+    avoidedSurfaceStorageM3
+  };
+
+  // G. Effectiveness Classification (Strict Precedence Order)
+  let classification: EffectivenessClassification = 'INCONCLUSIVE_NO_EFFECTIVE_PLAN';
+  let classificationRationale = '';
+
+  // 1. ADVERSE_LOCAL_DEFLECTION (Precedence 1)
+  if (
+    (spatialDeflection.maxAdverseDepthIncreaseM >= 0.05 && spatialDeflection.adverseCellCount >= 2) ||
+    spatialDeflection.deflectedVolumeM3 >= 25.0 ||
+    worsenedRoadNames.length > 0
+  ) {
+    classification = 'ADVERSE_LOCAL_DEFLECTION';
+    classificationRationale =
+      `DELTA Screening Criteria: Plan produces adverse localized ponding: ${spatialDeflection.adverseCellCount} cells show water depth increase ` +
+      `(peak rise: +${(spatialDeflection.maxAdverseDepthIncreaseM * 100).toFixed(1)} cm, deflected volume: ${spatialDeflection.deflectedVolumeM3.toLocaleString()} m³)` +
+      (worsenedRoadNames.length > 0 ? `, rendering ${worsenedRoadNames.join(', ')} newly impassable` : '') +
+      ` with net storage reduction of ${avoidedSurfaceVolumeM3.toLocaleString()} m³.`;
+  }
+  // 2. CAPACITY_CONSTRAINED (Precedence 2)
+  else if (
+    planDef.id === 'plan-beta' &&
+    interventionSinkExtractionM3 > 0 &&
+    interventionSinkExtractionM3 >= 0.85 * (planDef.physicalParameters.pumpCapacityM3PerSec || 2.0) * profile.durationSeconds &&
+    plan.waterDepth[17 * 64 + 25] >= 0.15
+  ) {
+    classification = 'CAPACITY_CONSTRAINED';
+    classificationRationale =
+      `DELTA Screening Criteria: Modelled mobile pump operating near nominal extraction capacity ` +
+      `(${interventionSinkExtractionM3.toLocaleString()} m³ drawn, ${((interventionSinkExtractionM3 / (2.0 * profile.durationSeconds)) * 100).toFixed(1)}% of theoretical maximum) ` +
+      `while local water continues accumulating at suction coordinate [17, 25] (${(plan.waterDepth[17 * 64 + 25] * 100).toFixed(1)} cm depth).`;
+  }
+  // 3. MEASURABLE_BENEFIT (Precedence 3)
+  else if (
+    avoidedSurfaceVolumeM3 >= 50.0 ||
+    improvedRoadNames.length > 0 ||
+    peakDepthReductionM >= 0.05
+  ) {
+    classification = 'MEASURABLE_BENEFIT';
+    classificationRationale =
+      `DELTA Screening Criteria: Plan provides measurable benefit: avoids ${avoidedSurfaceVolumeM3.toLocaleString()} m³ surface storage ` +
+      (improvedRoadNames.length > 0 ? `and restores passability on ${improvedRoadNames.join(', ')} ` : '') +
+      (peakDepthReductionM >= 0.01 ? `(peak domain depth reduced by ${(peakDepthReductionM * 100).toFixed(1)} cm).` : '.');
+  }
+  // 4. NEGLIGIBLE_IMPACT (Precedence 4)
+  else if (
+    Math.abs(avoidedSurfaceVolumeM3) < 10.0 &&
+    improvedRoadNames.length === 0 &&
+    worsenedRoadNames.length === 0 &&
+    spatialDeflection.adverseCellCount === 0
+  ) {
+    classification = 'NEGLIGIBLE_IMPACT';
+    classificationRationale =
+      `DELTA Screening Criteria: Plan yields negligible impact under this profile: avoided surface storage is ${avoidedSurfaceVolumeM3} m³ ` +
+      `with 0 road passability transitions and 0 hospital ingress changes.`;
+  }
+  // 5. INCONCLUSIVE (Precedence 5)
+  else {
+    classification = 'INCONCLUSIVE_NO_EFFECTIVE_PLAN';
+    classificationRationale =
+      `DELTA Screening Criteria: Comparative results are inconclusive under this profile: avoided storage is ${avoidedSurfaceVolumeM3} m³ ` +
+      `with no decisive passability improvement or volume reduction.`;
+  }
+
   return {
     planId: planDef.id,
     name: planDef.name,
     avoidedSurfaceVolumeM3,
     peakDepthReductionM,
-    protectedRoadCount: protectedRoadNames.length,
-    protectedRoadNames,
+    protectedRoadCount,
+    protectedRoadNames: improvedRoadNames,
+    roadTransitions,
     hospitalImprovements,
-    improvedHospitalCount
+    improvedHospitalCount,
+    spatialDeflection,
+    inletDrainageAccounting,
+    classification,
+    classificationRationale
   };
 }
 
 /**
- * Executes Phase 3 Multi-Scenario Intervention Evaluation.
+ * Deterministically generates evidence-based comparative findings from actual computed scenario outputs.
+ */
+export function generateEvidenceBasedFindings(
+  baseline: ScenarioRunMetrics,
+  _plans: {
+    alpha: ScenarioRunMetrics;
+    beta: ScenarioRunMetrics;
+    gamma: ScenarioRunMetrics;
+  },
+  differentials: {
+    alpha: PlanDifferential;
+    beta: PlanDifferential;
+    gamma: PlanDifferential;
+  },
+  profile: StressProfile
+): EvidenceBasedComparison {
+  const keyFindings: string[] = [];
+  const tradeOffs: string[] = [];
+  const capacityLimitations: string[] = [];
+
+  const { alpha: diffA, beta: diffB, gamma: diffG } = differentials;
+
+  // Overview context from baseline
+  keyFindings.push(
+    `Catchment Baseline: Under ${profile.name}, unmitigated catchment accumulates ${baseline.currentStorageM3.toLocaleString()} m³ surface storage ` +
+    `(total rain input: ${baseline.totalWaterVolumeM3.toLocaleString()} m³) with ${baseline.cumulativeDrainageM3.toLocaleString()} m³ drained through background stormwater inlets.`
+  );
+
+  // 1. Plan Alpha Analysis
+  if (diffA.spatialDeflection.adverseCellCount > 0) {
+    keyFindings.push(
+      `Plan Alpha (Francis St Barrier): Deflects surface runoff, causing localized depth increases on ${diffA.spatialDeflection.adverseCellCount} cells ` +
+      `(peak adverse rise: +${(diffA.spatialDeflection.maxAdverseDepthIncreaseM * 100).toFixed(1)} cm, deflected volume: ${diffA.spatialDeflection.deflectedVolumeM3.toLocaleString()} m³) ` +
+      `while yielding ${diffA.avoidedSurfaceVolumeM3.toLocaleString()} m³ net catchment storage reduction.`
+    );
+    tradeOffs.push(
+      `Plan Alpha creates local flow diversion: water prevented from entering immediate curb cuts ponds on adjacent terrain cells without reducing domain-wide water.`
+    );
+  } else {
+    keyFindings.push(
+      `Plan Alpha (Francis St Barrier): Yields negligible spatial effect under ${profile.name} (avoided storage: ${diffA.avoidedSurfaceVolumeM3} m³).`
+    );
+    tradeOffs.push(
+      `Plan Alpha Trade-off: Local sandbag barrier does not reduce domain-wide flood storage (avoided storage: ${diffA.avoidedSurfaceVolumeM3} m³).`
+    );
+  }
+
+  // 2. Plan Beta Analysis
+  keyFindings.push(
+    `Plan Beta (Mobile Pump #1): Extracted ${diffB.inletDrainageAccounting.interventionSinkExtractionM3.toLocaleString()} m³ from suction cell [17, 25], ` +
+    `reducing domain storage by ${diffB.avoidedSurfaceVolumeM3.toLocaleString()} m³ ` +
+    `(incremental drainage over baseline: ${diffB.inletDrainageAccounting.incrementalDrainageM3.toLocaleString()} m³).`
+  );
+  if (diffB.classification === 'CAPACITY_CONSTRAINED') {
+    capacityLimitations.push(
+      `Plan Beta: Modelled pump extraction (2.0 m³/s) operates at capacity while water continues accumulating, indicating hydraulic inflow exceeds pumping capacity under this intensity.`
+    );
+  }
+
+  // 3. Plan Gamma Analysis
+  keyFindings.push(
+    `Plan Gamma (Culvert Jetting): Modelled unrouted point drainage sink at [17, 26] extracted ${diffG.inletDrainageAccounting.interventionSinkExtractionM3.toLocaleString()} m³ ` +
+    `at nominal 12.5 m³/s capacity, reducing domain surface storage by ${diffG.avoidedSurfaceVolumeM3.toLocaleString()} m³ ` +
+    `(incremental drainage over baseline: ${diffG.inletDrainageAccounting.incrementalDrainageM3.toLocaleString()} m³).`
+  );
+  tradeOffs.push(
+    `Plan Gamma Solver Limitation: The Brookline culvert is represented as an unrouted point drainage sink on the elevated road deck (7.51m NAVD88); water is destroyed from domain storage rather than conveyed through a dynamic conduit into downstream basins.`
+  );
+
+  // 4. Recommendation Determination
+  // Select candidate with MEASURABLE_BENEFIT and highest volume avoided without ADVERSE_LOCAL_DEFLECTION
+  const candidates = [diffA, diffB, diffG].filter((d) => d.classification === 'MEASURABLE_BENEFIT');
+
+  let recommendedPlanId: string | null = null;
+  let recommendationRationale = '';
+  let overallAssessment = '';
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.avoidedSurfaceVolumeM3 - a.avoidedSurfaceVolumeM3);
+    recommendedPlanId = candidates[0].planId;
+    const best = candidates[0];
+    recommendationRationale =
+      `Recommended Plan: ${best.name}. Under ${profile.name}, this plan achieves the greatest measured screening benefit ` +
+      `(${best.avoidedSurfaceVolumeM3.toLocaleString()} m³ avoided surface storage, ${best.protectedRoadCount} protected road corridors) ` +
+      `without triggering adverse localized deflection thresholds.`;
+    overallAssessment =
+      `Differential evaluation demonstrates distinct physical regimes: ${best.name} provides the most measurable benefit under ${profile.name}.`;
+  } else {
+    // No plan qualified as MEASURABLE_BENEFIT
+    recommendedPlanId = null;
+    recommendationRationale =
+      `Inconclusive / No Recommended Plan: Under ${profile.name}, none of the three candidate interventions ` +
+      `achieved the DELTA screening threshold for measurable benefit (≥50 m³ avoided volume or road restoration) without adverse deflection penalties.`;
+    overallAssessment =
+      `Under constrained or low-intensity conditions, simulated interventions exhibit negligible impact or adverse local trade-offs. No municipal intervention is decisively warranted under these screening parameters.`;
+  }
+
+  return {
+    keyFindings,
+    tradeOffs,
+    capacityLimitations,
+    overallAssessment,
+    recommendedPlanId,
+    recommendationRationale
+  };
+}
+
+/**
+ * Executes Multi-Scenario Intervention Evaluation across an authoritative or custom stress profile.
  * Runs Baseline and all 3 Plans from an invariant, independent clone of the initial state.
  */
 export function executeMultiScenarioEvaluation(
   dataset: BostonCatchmentDataset,
-  simulatedSeconds: number = 3600, // 1-hour storm duration
-  rainfallRateMmPerHour: number = 35.0 // peak design burst
+  simulatedSecondsOrProfile: number | StressProfile | string = 3600,
+  rainfallRateMmPerHour: number = 35.0,
+  dtMacro: number = 20.0
 ): MultiScenarioEvaluationResult {
   const { nx } = dataset.metadata.grid;
+
+  // Resolve stress profile
+  let profile: StressProfile;
+  if (typeof simulatedSecondsOrProfile === 'string') {
+    profile = AUTHORITATIVE_STRESS_PROFILES[simulatedSecondsOrProfile] || AUTHORITATIVE_STRESS_PROFILES['synthetic-moderate-stress'];
+  } else if (typeof simulatedSecondsOrProfile === 'object') {
+    profile = simulatedSecondsOrProfile;
+  } else {
+    // Legacy numeric duration invocation
+    const durationSeconds = simulatedSecondsOrProfile;
+    profile = {
+      id: `custom-${durationSeconds}s-${rainfallRateMmPerHour}mmh`,
+      name: `Synthetic Stress (${rainfallRateMmPerHour} mm/h, ${(durationSeconds / 3600).toFixed(1)}h)`,
+      type: 'SYNTHETIC_STRESS_INPUT',
+      durationHours: durationSeconds / 3600,
+      durationSeconds,
+      totalRainfallMm: Math.round((rainfallRateMmPerHour * (durationSeconds / 3600)) * 10) / 10,
+      rainfallIntensityMmPerHour: rainfallRateMmPerHour,
+      initialConditionsDescription: 'Dry bare-earth terrain (h = 0.0 m across all 4096 cells)',
+      provenance: 'Configured scenario run',
+      disclosures: ['Synthetic exploratory stress input']
+    };
+  }
 
   // 1. Construct Authoritative Invariant Baseline Configuration
   // Represents emergency condition: CULVERT-01-BROOKLINE blocked (100% blockage)
@@ -297,12 +728,11 @@ export function executeMultiScenarioEvaluation(
     openBoundaries: 'muddy_river_outlet'
   });
 
-  // Apply disruption to baseline
+  // Apply disruption to baseline (cell [17, 26] = 1114)
   if (baseDisruptedConfig.drainageInlets) {
     baseDisruptedConfig.drainageInlets = baseDisruptedConfig.drainageInlets.map((inlet) => {
-      // Cell [17, 26] = 1114 (CULVERT-01-BROOKLINE)
       if (inlet.index === 17 * nx + 26) {
-        return { ...inlet, blockageRatio: 1.0 };
+        return { ...inlet, blockageRatio: 1.0, inletId: 'CULVERT-01-BROOKLINE' };
       }
       return inlet;
     });
@@ -314,8 +744,8 @@ export function executeMultiScenarioEvaluation(
     baseDisruptedConfig,
     'baseline-emergency',
     'Baseline: Unmitigated Emergency (Choked Culvert)',
-    simulatedSeconds,
-    rainfallRateMmPerHour
+    profile,
+    dtMacro
   );
 
   // 2. Construct Plan Alpha (Deployable Sandbag Barrier: +0.50m crest along Francis St cells)
@@ -338,8 +768,8 @@ export function executeMultiScenarioEvaluation(
     alphaConfig,
     'plan-alpha',
     alphaDef.name,
-    simulatedSeconds,
-    rainfallRateMmPerHour
+    profile,
+    dtMacro
   );
 
   // 3. Construct Plan Beta (Mobile Pump #1: 2.0 m³/s active suction sink at [17, 25])
@@ -351,11 +781,12 @@ export function executeMultiScenarioEvaluation(
     ? baseDisruptedConfig.drainageInlets.map((i) => ({ ...i }))
     : [];
 
-  // Add mobile suction pump as an active drainage sink
+  // Add mobile suction pump with explicit inletId
   betaInlets.push({
     index: pumpIndex,
     capacityM3PerSec: betaDef.physicalParameters.pumpCapacityM3PerSec || 2.0,
-    blockageRatio: 0.0 // 100% operational
+    blockageRatio: 0.0, // 100% operational
+    inletId: 'PUMP-BETA-MOBILE'
   });
 
   const betaConfig: HydraulicGridConfig = {
@@ -369,8 +800,8 @@ export function executeMultiScenarioEvaluation(
     betaConfig,
     'plan-beta',
     betaDef.name,
-    simulatedSeconds,
-    rainfallRateMmPerHour
+    profile,
+    dtMacro
   );
 
   // 4. Construct Plan Gamma (Emergency Culvert Jetting: Restores CULVERT-01-BROOKLINE to 12.5 m³/s)
@@ -382,7 +813,8 @@ export function executeMultiScenarioEvaluation(
           return {
             ...inlet,
             capacityM3PerSec: gammaDef.physicalParameters.restoredCapacityM3PerSec || 12.5,
-            blockageRatio: 0.0
+            blockageRatio: 0.0,
+            inletId: 'CULVERT-01-BROOKLINE'
           };
         }
         return { ...inlet };
@@ -400,28 +832,27 @@ export function executeMultiScenarioEvaluation(
     gammaConfig,
     'plan-gamma',
     gammaDef.name,
-    simulatedSeconds,
-    rainfallRateMmPerHour
+    profile,
+    dtMacro
   );
 
   // 5. Compute Comparative Differentials
-  const diffAlpha = computePlanDifferential(baseline, planAlpha, alphaDef);
-  const diffBeta = computePlanDifferential(baseline, planBeta, betaDef);
-  const diffGamma = computePlanDifferential(baseline, planGamma, gammaDef);
+  const diffAlpha = computePlanDifferential(baseline, planAlpha, alphaDef, profile);
+  const diffBeta = computePlanDifferential(baseline, planBeta, betaDef, profile);
+  const diffGamma = computePlanDifferential(baseline, planGamma, gammaDef, profile);
 
-  // 6. Objective Model Ranking
-  // Determine which plan avoids the most volume
+  // 6. Evidence-Based Comparative Analysis
+  const comparison = generateEvidenceBasedFindings(
+    baseline,
+    { alpha: planAlpha, beta: planBeta, gamma: planGamma },
+    { alpha: diffAlpha, beta: diffBeta, gamma: diffGamma },
+    profile
+  );
+
+  // Ranking compatibility mapping
   const plans = [diffAlpha, diffBeta, diffGamma];
-  plans.sort((a, b) => b.avoidedSurfaceVolumeM3 - a.avoidedSurfaceVolumeM3);
-  const mostVolumeAvoided = plans[0].planId;
-
-  // Plan Gamma or Beta will typically remove the most volume because jetting or pumping actively removes water
-  const recommendedPlanId = mostVolumeAvoided;
-  const recommendationRationale = 
-    `Plan Gamma (Culvert Jetting) restores 12.5 m³/s gravitational conveyance at CULVERT-01-BROOKLINE, ` +
-    `avoiding ${diffGamma.avoidedSurfaceVolumeM3.toLocaleString()} m³ of surface flood storage. ` +
-    `Plan Beta (Mobile Pump) actively extracts ${diffBeta.avoidedSurfaceVolumeM3.toLocaleString()} m³, ` +
-    `while Plan Alpha deflects local flow along Francis St but does not reduce domain-wide storage.`;
+  const sortedByVolume = [...plans].sort((a, b) => b.avoidedSurfaceVolumeM3 - a.avoidedSurfaceVolumeM3);
+  const sortedByRoads = [...plans].sort((a, b) => b.protectedRoadCount - a.protectedRoadCount);
 
   return {
     baseline,
@@ -437,18 +868,25 @@ export function executeMultiScenarioEvaluation(
       planGamma: diffGamma
     },
     ranking: {
-      mostVolumeAvoided,
-      mostRoadsProtected: plans.sort((a, b) => b.protectedRoadCount - a.protectedRoadCount)[0].planId,
-      recommendedPlanId,
-      recommendationRationale
+      mostVolumeAvoided: sortedByVolume[0].planId,
+      mostRoadsProtected: sortedByRoads[0].planId,
+      recommendedPlanId: comparison.recommendedPlanId || sortedByVolume[0].planId,
+      recommendationRationale: comparison.recommendationRationale
     },
+    comparison,
     simulationMetadata: {
-      stormId: '50-year',
-      stormLabel: 'NOAA Atlas 14 50-Year Design Burst (104.2 mm total depth)',
-      simulatedDurationSeconds: simulatedSeconds,
-      rainfallIntensityMmPerHour: rainfallRateMmPerHour,
+      profileId: profile.id,
+      profileLabel: profile.name,
+      profileType: profile.type,
+      stormId: profile.id,
+      stormLabel: profile.name,
+      simulatedDurationSeconds: profile.durationSeconds,
+      rainfallIntensityMmPerHour: profile.rainfallIntensityMmPerHour ?? (profile.totalRainfallMm / profile.durationHours),
+      totalRainfallMm: profile.totalRainfallMm,
       disruptionId: 'CULVERT-01-BROOKLINE-BLOCKAGE',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      provenance: profile.provenance,
+      disclosures: profile.disclosures
     }
   };
 }

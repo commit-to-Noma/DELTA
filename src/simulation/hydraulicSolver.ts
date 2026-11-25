@@ -8,6 +8,7 @@ export interface DrainageInlet {
   index: number;
   capacityM3PerSec: number;
   blockageRatio: number; // 0.0 (open) to 1.0 (fully blocked)
+  inletId?: string; // Sourced unique identifier for provenance and accounting
 }
 
 export interface HydraulicGridConfig {
@@ -30,6 +31,7 @@ export interface WaterBalanceAccounting {
   cumulativeBoundaryOutflowM3: number;
   massBalanceErrorM3: number;
   relativeError: number;
+  drainageByInletId?: Record<string, number>; // Inlet-specific cumulative volume in m³
 }
 
 export interface SimulationState {
@@ -92,6 +94,7 @@ export function createHydraulicState(
       cumulativeBoundaryOutflowM3: 0,
       massBalanceErrorM3: 0,
       relativeError: 0,
+      drainageByInletId: {},
     },
     totalTimeSeconds: 0,
     lastMaxVelocity: 0,
@@ -143,6 +146,7 @@ export function stepHydraulics(
   let cumInfil = accounting.cumulativeInfiltrationM3;
   let cumDrain = accounting.cumulativeDrainageM3;
   let cumOutfall = accounting.cumulativeBoundaryOutflowM3;
+  const drainageByInletId: Record<string, number> = { ...(accounting.drainageByInletId || {}) };
   let maxObservedVelocity = 0;
 
   // Adaptive sub-stepping loop
@@ -334,6 +338,9 @@ export function stepHydraulics(
 
           h[cellIdx] -= drainVol / cellArea;
           cumDrain += drainVol;
+
+          const key = inlet.inletId || `inlet_${cellIdx}`;
+          drainageByInletId[key] = (drainageByInletId[key] || 0) + drainVol;
         }
       }
     }
@@ -410,6 +417,7 @@ export function stepHydraulics(
       cumulativeBoundaryOutflowM3: cumOutfall,
       massBalanceErrorM3,
       relativeError,
+      drainageByInletId,
     },
     totalTimeSeconds: state.totalTimeSeconds + options.dtMacroSeconds,
     lastMaxVelocity: maxObservedVelocity,

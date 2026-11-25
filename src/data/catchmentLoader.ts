@@ -276,6 +276,7 @@ export function createHydraulicConfigFromCatchment(
     index: inlet.gridCell[0] * nx + inlet.gridCell[1],
     capacityM3PerSec: inlet.designCapacityM3PerSec,
     blockageRatio: inlet.defaultBlockageRatio,
+    inletId: inlet.inletId,
   }));
 
   // Setup open boundary conditions
