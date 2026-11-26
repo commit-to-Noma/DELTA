@@ -25,11 +25,52 @@ import {
   DrainageInlet
 } from './hydraulicSolver';
 import {
+  AUTHORITATIVE_DISRUPTIONS,
   evaluateHospitalAccess,
   evaluateRoadPassability,
   HospitalImpact,
   RoadPassabilityImpact
 } from './disruptionEngine';
+
+export interface AssetThresholdCrossing {
+  assetId: string;
+  assetName: string;
+  assetType: 'ROAD' | 'HOSPITAL_ACCESS';
+  firstCrossing15cmSeconds: number | null;
+  firstCrossing30cmSeconds: number | null;
+  peakDepthM: number;
+}
+
+export type ThresholdComparisonOutcome =
+  | 'NEVER_CROSSED'
+  | 'AVOIDED'
+  | 'DELAYED'
+  | 'UNCHANGED'
+  | 'ACCELERATED'
+  | 'NEWLY_CROSSED';
+
+export interface AssetThresholdComparison {
+  assetId: string;
+  assetName: string;
+  assetType: 'ROAD' | 'HOSPITAL_ACCESS';
+  thresholdM: 0.15 | 0.30;
+  baselineCrossingSeconds: number | null;
+  planCrossingSeconds: number | null;
+  deltaSeconds: number | null; // plan - baseline when both cross (+ = delayed, - = accelerated)
+  outcome: ThresholdComparisonOutcome;
+}
+
+export interface TemporalThresholdSummary {
+  dtMacroSeconds: number;
+  simulatedDurationSeconds: number;
+  road30cmComparisons: AssetThresholdComparison[];
+  road15cmComparisons: AssetThresholdComparison[];
+  hospitalAccess30cmComparisons: AssetThresholdComparison[];
+  avoided30cmRoadCount: number;
+  delayed30cmRoadCount: number;
+  acceleratedOrNewlyCrossed30cmRoadCount: number;
+  disclosure: string;
+}
 
 export interface InterventionDefinition {
   id: 'plan-alpha' | 'plan-beta' | 'plan-gamma';
@@ -65,6 +106,9 @@ export interface ScenarioRunMetrics {
   waterDepth: Float64Array;
   relativeConservationError: number;
   drainageByInletId: Record<string, number>;
+  dtMacroSeconds: number;
+  roadThresholdCrossings: AssetThresholdCrossing[];
+  hospitalAccessCrossings: AssetThresholdCrossing[];
 }
 
 export interface HospitalImprovement {
@@ -114,6 +158,7 @@ export interface PlanDifferential {
   improvedHospitalCount: number;
   spatialDeflection: SpatialDeflectionMetrics;
   inletDrainageAccounting: InletDrainageAccounting;
+  temporalThresholds: TemporalThresholdSummary;
   classification: EffectivenessClassification;
   classificationRationale: string;
 }
@@ -168,9 +213,12 @@ export interface MultiScenarioEvaluationResult {
     stormId: string;
     stormLabel: string;
     simulatedDurationSeconds: number;
+    dtMacroSeconds: number;
     rainfallIntensityMmPerHour: number;
     totalRainfallMm: number;
     disruptionId: string;
+    activeDisruptionIds: string[];
+    activeDisruptionLabels: string[];
     timestamp: string;
     provenance: string;
     disclosures: string[];
@@ -315,6 +363,8 @@ export function getRainfallRateAtElapsed(profile: StressProfile, elapsedSeconds:
 
 /**
  * Executes a single simulation run given a configuration and stress profile.
+ * Records discrete time-to-threshold crossings at exact macro-step intervals (dtMacro)
+ * without sub-step interpolation.
  */
 function runSingleScenario(
   dataset: BostonCatchmentDataset,
@@ -324,8 +374,37 @@ function runSingleScenario(
   profile: StressProfile,
   dtMacro: number = 20.0
 ): ScenarioRunMetrics {
+  const { nx } = dataset.metadata.grid;
   let state = createHydraulicState(config);
   const numSteps = Math.max(1, Math.floor(profile.durationSeconds / dtMacro));
+
+  // Pre-index road and hospital-access cells for fast discrete threshold observation
+  const roadCellIndices = dataset.criticalRoads.map((road) =>
+    road.gridCells.map(([r, c]) => r * nx + c)
+  );
+  const roadFirst15: (number | null)[] = new Array(dataset.criticalRoads.length).fill(null);
+  const roadFirst30: (number | null)[] = new Array(dataset.criticalRoads.length).fill(null);
+  const roadPeakDepth: number[] = new Array(dataset.criticalRoads.length).fill(0);
+
+  const hospitalAccessIndices = dataset.criticalFacilities.map((fac) => {
+    const idxSet = new Set<number>();
+    for (const arteryName of fac.accessArteries) {
+      for (const road of dataset.criticalRoads) {
+        if (
+          road.name.toLowerCase().includes(arteryName.toLowerCase()) ||
+          arteryName.toLowerCase().includes(road.name.toLowerCase())
+        ) {
+          for (const [rr, cc] of road.gridCells) {
+            idxSet.add(rr * nx + cc);
+          }
+        }
+      }
+    }
+    return Array.from(idxSet);
+  });
+  const hospFirst15: (number | null)[] = new Array(dataset.criticalFacilities.length).fill(null);
+  const hospFirst30: (number | null)[] = new Array(dataset.criticalFacilities.length).fill(null);
+  const hospPeakDepth: number[] = new Array(dataset.criticalFacilities.length).fill(0);
 
   for (let s = 0; s < numSteps; s++) {
     const elapsed = s * dtMacro;
@@ -334,6 +413,35 @@ function runSingleScenario(
       dtMacroSeconds: dtMacro,
       rainfallRateMmPerHour: currentRate
     });
+
+    const elapsedAfterStep = (s + 1) * dtMacro;
+    const hArr = state.waterDepth;
+
+    // Sample discrete road screening threshold crossings
+    for (let rIdx = 0; rIdx < roadCellIndices.length; rIdx++) {
+      const cells = roadCellIndices[rIdx];
+      let maxD = 0;
+      for (let k = 0; k < cells.length; k++) {
+        const d = hArr[cells[k]] || 0;
+        if (d > maxD) maxD = d;
+      }
+      if (maxD > roadPeakDepth[rIdx]) roadPeakDepth[rIdx] = maxD;
+      if (roadFirst15[rIdx] === null && maxD >= 0.15) roadFirst15[rIdx] = elapsedAfterStep;
+      if (roadFirst30[rIdx] === null && maxD >= 0.30) roadFirst30[rIdx] = elapsedAfterStep;
+    }
+
+    // Sample discrete hospital access corridor threshold crossings
+    for (let hIdx = 0; hIdx < hospitalAccessIndices.length; hIdx++) {
+      const cells = hospitalAccessIndices[hIdx];
+      let maxD = 0;
+      for (let k = 0; k < cells.length; k++) {
+        const d = hArr[cells[k]] || 0;
+        if (d > maxD) maxD = d;
+      }
+      if (maxD > hospPeakDepth[hIdx]) hospPeakDepth[hIdx] = maxD;
+      if (hospFirst15[hIdx] === null && maxD >= 0.15) hospFirst15[hIdx] = elapsedAfterStep;
+      if (hospFirst30[hIdx] === null && maxD >= 0.30) hospFirst30[hIdx] = elapsedAfterStep;
+    }
   }
 
   // Max depth across domain
@@ -349,6 +457,24 @@ function runSingleScenario(
 
   const impassableRoadCount = roads.filter((r) => r.status === 'CRITICAL_IMPASSABLE').length;
   const atRiskHospitalCount = hospitals.filter((h) => h.status !== 'ACCESSIBLE').length;
+
+  const roadThresholdCrossings: AssetThresholdCrossing[] = dataset.criticalRoads.map((road, idx) => ({
+    assetId: road.roadId,
+    assetName: road.name,
+    assetType: 'ROAD',
+    firstCrossing15cmSeconds: roadFirst15[idx],
+    firstCrossing30cmSeconds: roadFirst30[idx],
+    peakDepthM: Math.round(roadPeakDepth[idx] * 1000) / 1000
+  }));
+
+  const hospitalAccessCrossings: AssetThresholdCrossing[] = dataset.criticalFacilities.map((fac, idx) => ({
+    assetId: fac.facilityId,
+    assetName: fac.name,
+    assetType: 'HOSPITAL_ACCESS',
+    firstCrossing15cmSeconds: hospFirst15[idx],
+    firstCrossing30cmSeconds: hospFirst30[idx],
+    peakDepthM: Math.round(hospPeakDepth[idx] * 1000) / 1000
+  }));
 
   return {
     scenarioId,
@@ -366,7 +492,119 @@ function runSingleScenario(
     roads,
     waterDepth: state.waterDepth,
     relativeConservationError: state.accounting.relativeError,
-    drainageByInletId: state.accounting.drainageByInletId || {}
+    drainageByInletId: state.accounting.drainageByInletId || {},
+    dtMacroSeconds: dtMacro,
+    roadThresholdCrossings,
+    hospitalAccessCrossings
+  };
+}
+
+function classifyThresholdComparison(
+  baselineSeconds: number | null,
+  planSeconds: number | null
+): { outcome: ThresholdComparisonOutcome; deltaSeconds: number | null } {
+  if (baselineSeconds === null && planSeconds === null) {
+    return { outcome: 'NEVER_CROSSED', deltaSeconds: null };
+  }
+  if (baselineSeconds !== null && planSeconds === null) {
+    return { outcome: 'AVOIDED', deltaSeconds: null };
+  }
+  if (baselineSeconds === null && planSeconds !== null) {
+    return { outcome: 'NEWLY_CROSSED', deltaSeconds: null };
+  }
+  const delta = (planSeconds as number) - (baselineSeconds as number);
+  if (delta > 0) return { outcome: 'DELAYED', deltaSeconds: delta };
+  if (delta < 0) return { outcome: 'ACCELERATED', deltaSeconds: delta };
+  return { outcome: 'UNCHANGED', deltaSeconds: 0 };
+}
+
+function buildTemporalThresholdSummary(
+  baseline: ScenarioRunMetrics,
+  plan: ScenarioRunMetrics,
+  profile: StressProfile
+): TemporalThresholdSummary {
+  const dtMacroSeconds = baseline.dtMacroSeconds || 20.0;
+  const baseRoadMap = new Map<string, AssetThresholdCrossing>();
+  for (const rc of baseline.roadThresholdCrossings || []) {
+    baseRoadMap.set(rc.assetId, rc);
+  }
+
+  const road30cmComparisons: AssetThresholdComparison[] = [];
+  const road15cmComparisons: AssetThresholdComparison[] = [];
+
+  for (const pr of plan.roadThresholdCrossings || []) {
+    const br = baseRoadMap.get(pr.assetId);
+    if (!br) continue;
+
+    const c30 = classifyThresholdComparison(br.firstCrossing30cmSeconds, pr.firstCrossing30cmSeconds);
+    if (c30.outcome !== 'NEVER_CROSSED') {
+      road30cmComparisons.push({
+        assetId: pr.assetId,
+        assetName: pr.assetName,
+        assetType: 'ROAD',
+        thresholdM: 0.30,
+        baselineCrossingSeconds: br.firstCrossing30cmSeconds,
+        planCrossingSeconds: pr.firstCrossing30cmSeconds,
+        deltaSeconds: c30.deltaSeconds,
+        outcome: c30.outcome
+      });
+    }
+
+    const c15 = classifyThresholdComparison(br.firstCrossing15cmSeconds, pr.firstCrossing15cmSeconds);
+    if (c15.outcome !== 'NEVER_CROSSED') {
+      road15cmComparisons.push({
+        assetId: pr.assetId,
+        assetName: pr.assetName,
+        assetType: 'ROAD',
+        thresholdM: 0.15,
+        baselineCrossingSeconds: br.firstCrossing15cmSeconds,
+        planCrossingSeconds: pr.firstCrossing15cmSeconds,
+        deltaSeconds: c15.deltaSeconds,
+        outcome: c15.outcome
+      });
+    }
+  }
+
+  const baseHospMap = new Map<string, AssetThresholdCrossing>();
+  for (const hc of baseline.hospitalAccessCrossings || []) {
+    baseHospMap.set(hc.assetId, hc);
+  }
+
+  const hospitalAccess30cmComparisons: AssetThresholdComparison[] = (plan.hospitalAccessCrossings || []).map((ph) => {
+    const bh = baseHospMap.get(ph.assetId);
+    const baseSec = bh ? bh.firstCrossing30cmSeconds : null;
+    const c30 = classifyThresholdComparison(baseSec, ph.firstCrossing30cmSeconds);
+    return {
+      assetId: ph.assetId,
+      assetName: ph.assetName,
+      assetType: 'HOSPITAL_ACCESS',
+      thresholdM: 0.30,
+      baselineCrossingSeconds: baseSec,
+      planCrossingSeconds: ph.firstCrossing30cmSeconds,
+      deltaSeconds: c30.deltaSeconds,
+      outcome: c30.outcome
+    };
+  });
+
+  const avoided30cmRoadCount = road30cmComparisons.filter((c) => c.outcome === 'AVOIDED').length;
+  const delayed30cmRoadCount = road30cmComparisons.filter((c) => c.outcome === 'DELAYED').length;
+  const acceleratedOrNewlyCrossed30cmRoadCount = road30cmComparisons.filter(
+    (c) => c.outcome === 'ACCELERATED' || c.outcome === 'NEWLY_CROSSED'
+  ).length;
+
+  return {
+    dtMacroSeconds,
+    simulatedDurationSeconds: profile.durationSeconds,
+    road30cmComparisons,
+    road15cmComparisons,
+    hospitalAccess30cmComparisons,
+    avoided30cmRoadCount,
+    delayed30cmRoadCount,
+    acceleratedOrNewlyCrossed30cmRoadCount,
+    disclosure:
+      `Discrete threshold-crossing times sampled at Δt = ${dtMacroSeconds}s solver macro-step intervals across 25m screening cells ` +
+      `(15cm / 30cm depth screening tiers) over ${profile.durationSeconds}s. No sub-step interpolation is performed. ` +
+      `These screening metrics do not represent vehicle clearance, ambulance access, road travel time, or real-world response windows.`
   };
 }
 
@@ -560,6 +798,8 @@ function computePlanDifferential(
       `with no decisive passability improvement or volume reduction.`;
   }
 
+  const temporalThresholds = buildTemporalThresholdSummary(baseline, plan, profile);
+
   return {
     planId: planDef.id,
     name: planDef.name,
@@ -572,6 +812,7 @@ function computePlanDifferential(
     improvedHospitalCount,
     spatialDeflection,
     inletDrainageAccounting,
+    temporalThresholds,
     classification,
     classificationRationale
   };
@@ -693,7 +934,8 @@ export function executeMultiScenarioEvaluation(
   dataset: BostonCatchmentDataset,
   simulatedSecondsOrProfile: number | StressProfile | string = 3600,
   rainfallRateMmPerHour: number = 35.0,
-  dtMacro: number = 20.0
+  dtMacro: number = 20.0,
+  activeDisruptionIds: string[] = ['disruption-brookline-culvert']
 ): MultiScenarioEvaluationResult {
   const { nx } = dataset.metadata.grid;
 
@@ -720,30 +962,50 @@ export function executeMultiScenarioEvaluation(
     };
   }
 
+  // Resolve active physical disruptions identically for baseline and all 3 plans
+  const normalizedDisruptionIds = Array.from(new Set(activeDisruptionIds)).sort();
+  const activeDisruptions = normalizedDisruptionIds
+    .map((id) => AUTHORITATIVE_DISRUPTIONS.find((d) => d.id === id))
+    .filter((d): d is NonNullable<typeof d> => Boolean(d));
+
+  const disruptionIdString =
+    normalizedDisruptionIds.length === 0
+      ? 'NONE_NOMINAL_DRAINAGE'
+      : normalizedDisruptionIds.length === 1 && normalizedDisruptionIds[0] === 'disruption-brookline-culvert'
+      ? 'CULVERT-01-BROOKLINE-BLOCKAGE'
+      : normalizedDisruptionIds.join('+');
+
   // 1. Construct Authoritative Invariant Baseline Configuration
-  // Represents emergency condition: CULVERT-01-BROOKLINE blocked (100% blockage)
   const baseDisruptedConfig = createHydraulicConfigFromCatchment(dataset, {
     manningN: 0.025,
     defaultInfiltrationMmPerHour: 2.0,
     openBoundaries: 'muddy_river_outlet'
   });
 
-  // Apply disruption to baseline (cell [17, 26] = 1114)
-  if (baseDisruptedConfig.drainageInlets) {
+  // Apply active disruptions strictly to designated drainage inlets
+  if (baseDisruptedConfig.drainageInlets && activeDisruptions.length > 0) {
     baseDisruptedConfig.drainageInlets = baseDisruptedConfig.drainageInlets.map((inlet) => {
-      if (inlet.index === 17 * nx + 26) {
-        return { ...inlet, blockageRatio: 1.0, inletId: 'CULVERT-01-BROOKLINE' };
+      const matched = activeDisruptions.find(
+        (d) => d.gridCell[0] * nx + d.gridCell[1] === inlet.index || d.targetInletId === inlet.inletId
+      );
+      if (matched) {
+        return { ...inlet, blockageRatio: matched.blockageRatio, inletId: matched.targetInletId };
       }
-      return inlet;
+      return { ...inlet };
     });
   }
 
   // Run Baseline Scenario
+  const baselineLabel =
+    activeDisruptions.length === 0
+      ? 'Baseline: Unmitigated Nominal Drainage'
+      : `Baseline: Unmitigated (${activeDisruptions.map((d) => d.targetInletId).join(', ')} Impaired)`;
+
   const baseline = runSingleScenario(
     dataset,
     baseDisruptedConfig,
     'baseline-emergency',
-    'Baseline: Unmitigated Emergency (Choked Culvert)',
+    baselineLabel,
     profile,
     dtMacro
   );
@@ -881,9 +1143,12 @@ export function executeMultiScenarioEvaluation(
       stormId: profile.id,
       stormLabel: profile.name,
       simulatedDurationSeconds: profile.durationSeconds,
+      dtMacroSeconds: dtMacro,
       rainfallIntensityMmPerHour: profile.rainfallIntensityMmPerHour ?? (profile.totalRainfallMm / profile.durationHours),
       totalRainfallMm: profile.totalRainfallMm,
-      disruptionId: 'CULVERT-01-BROOKLINE-BLOCKAGE',
+      disruptionId: disruptionIdString,
+      activeDisruptionIds: normalizedDisruptionIds,
+      activeDisruptionLabels: activeDisruptions.map((d) => d.name),
       timestamp: new Date().toISOString(),
       provenance: profile.provenance,
       disclosures: profile.disclosures

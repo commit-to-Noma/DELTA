@@ -459,3 +459,300 @@ export function executeDisruptionRecalculation(
     baselineDepthArray: baselineState.waterDepth
   };
 }
+
+export interface RainfallScheduleInput {
+  id: string;
+  name: string;
+  durationSeconds: number;
+  durationHours: number;
+  totalRainfallMm: number;
+  rainfallIntensityMmPerHour?: number;
+  hyetographHours?: { hourIndex: number; startHour: number; endHour: number; depthMm: number; rateMmPerHour: number }[];
+}
+
+export interface AffectedInletDelta {
+  disruptionId: string;
+  inletId: string;
+  targetName: string;
+  gridCell: [number, number];
+  blockageRatio: number;
+  nominalCapacityM3PerSec: number;
+  effectiveCapacityM3PerSec: number;
+  nominalDepthM: number;
+  disruptedDepthM: number;
+  depthChangeM: number; // disrupted - nominal (+ = deeper under disruption)
+  nominalDrainageM3: number;
+  disruptedDrainageM3: number;
+  drainageLossM3: number;
+}
+
+export interface SpatialDisruptionComparisonResult {
+  profileId: string;
+  profileName: string;
+  activeDisruptionIds: string[];
+  activeDisruptions: DisruptionScenario[];
+  simulatedTimeSeconds: number;
+  dtMacroSeconds: number;
+  nominal: {
+    cumulativeDrainageM3: number;
+    currentStorageM3: number;
+    maxWaterDepthM: number;
+    impassableRoadCount: number;
+    cautionRoadCount: number;
+    atRiskHospitalCount: number;
+    roads: RoadPassabilityImpact[];
+    hospitals: HospitalImpact[];
+    waterDepth: Float64Array;
+    relativeConservationError: number;
+  };
+  disrupted: {
+    cumulativeDrainageM3: number;
+    currentStorageM3: number;
+    maxWaterDepthM: number;
+    impassableRoadCount: number;
+    cautionRoadCount: number;
+    atRiskHospitalCount: number;
+    roads: RoadPassabilityImpact[];
+    hospitals: HospitalImpact[];
+    waterDepth: Float64Array;
+    relativeConservationError: number;
+  };
+  delta: {
+    retainedWaterVolumeDeltaM3: number; // disrupted - nominal storage (+ = extra water retained)
+    lostDrainageVolumeM3: number;       // nominal - disrupted drainage
+    maxWaterDepthDeltaM: number;
+    newlyImpassableRoads: RoadPassabilityImpact[];
+    newlyCautionRoads: RoadPassabilityImpact[];
+    improvedRoads: RoadPassabilityImpact[];
+    newlyAtRiskHospitals: string[];
+    adverseCellCount: number;           // cells where disrupted - nominal >= 0.01m
+    beneficialCellCount: number;        // cells where nominal - disrupted >= 0.01m
+    peakAdverseDepthRiseM: number;
+    peakBeneficialDrawdownM: number;
+  };
+  affectedInletMetrics: AffectedInletDelta[];
+  causalSummary: string;
+}
+
+function getScheduleRateAtElapsed(schedule: RainfallScheduleInput, elapsedSeconds: number): number {
+  if (elapsedSeconds >= schedule.durationSeconds) return 0.0;
+  if (schedule.hyetographHours && schedule.hyetographHours.length > 0) {
+    const idx = Math.min(schedule.hyetographHours.length - 1, Math.floor(elapsedSeconds / 3600));
+    return schedule.hyetographHours[idx].rateMmPerHour;
+  }
+  return schedule.rainfallIntensityMmPerHour ?? (schedule.totalRainfallMm / Math.max(schedule.durationHours, 1e-6));
+}
+
+/**
+ * Executes a full spatial 2D solver comparison between unobstructed nominal drainage
+ * and the active set of physical drainage disruptions under the exact selected rainfall profile.
+ */
+export function executeSpatialDisruptionComparison(
+  dataset: BostonCatchmentDataset,
+  activeDisruptionIds: string[],
+  schedule: RainfallScheduleInput,
+  dtMacro: number = 30.0
+): SpatialDisruptionComparisonResult {
+  const { nx } = dataset.metadata.grid;
+  const activeDisruptions = activeDisruptionIds
+    .map((id) => AUTHORITATIVE_DISRUPTIONS.find((d) => d.id === id))
+    .filter((d): d is DisruptionScenario => Boolean(d));
+
+  // 1. Nominal unobstructed catchment config
+  const nominalConfig: HydraulicGridConfig = createHydraulicConfigFromCatchment(dataset, {
+    manningN: 0.025,
+    defaultInfiltrationMmPerHour: 2.0,
+    openBoundaries: 'muddy_river_outlet'
+  });
+
+  // 2. Disrupted catchment config with exact selected disruptions
+  const disruptedConfig: HydraulicGridConfig = createHydraulicConfigFromCatchment(dataset, {
+    manningN: 0.025,
+    defaultInfiltrationMmPerHour: 2.0,
+    openBoundaries: 'muddy_river_outlet'
+  });
+
+  if (disruptedConfig.drainageInlets && activeDisruptions.length > 0) {
+    disruptedConfig.drainageInlets = disruptedConfig.drainageInlets.map((inlet) => {
+      const matched = activeDisruptions.find(
+        (d) => d.gridCell[0] * nx + d.gridCell[1] === inlet.index || d.targetInletId === inlet.inletId
+      );
+      if (matched) {
+        return {
+          ...inlet,
+          blockageRatio: matched.blockageRatio
+        };
+      }
+      return { ...inlet };
+    });
+  }
+
+  const numSteps = Math.max(1, Math.floor(schedule.durationSeconds / dtMacro));
+
+  // Step Nominal State
+  let nominalState: SimulationState = createHydraulicState(nominalConfig);
+  for (let s = 0; s < numSteps; s++) {
+    const rate = getScheduleRateAtElapsed(schedule, s * dtMacro);
+    nominalState = stepHydraulics(nominalState, {
+      dtMacroSeconds: dtMacro,
+      rainfallRateMmPerHour: rate
+    });
+  }
+
+  // Step Disrupted State (if no disruptions active, clone nominal deterministically)
+  let disruptedState: SimulationState;
+  if (activeDisruptions.length === 0) {
+    disruptedState = {
+      ...nominalState,
+      waterDepth: new Float64Array(nominalState.waterDepth),
+      accounting: {
+        ...nominalState.accounting,
+        drainageByInletId: { ...(nominalState.accounting.drainageByInletId || {}) }
+      }
+    };
+  } else {
+    disruptedState = createHydraulicState(disruptedConfig);
+    for (let s = 0; s < numSteps; s++) {
+      const rate = getScheduleRateAtElapsed(schedule, s * dtMacro);
+      disruptedState = stepHydraulics(disruptedState, {
+        dtMacroSeconds: dtMacro,
+        rainfallRateMmPerHour: rate
+      });
+    }
+  }
+
+  // Max depths and spatial differences
+  let nominalMaxDepth = 0;
+  let disruptedMaxDepth = 0;
+  let adverseCellCount = 0;
+  let beneficialCellCount = 0;
+  let peakAdverseDepthRiseM = 0;
+  let peakBeneficialDrawdownM = 0;
+
+  for (let i = 0; i < nominalState.waterDepth.length; i++) {
+    const hNom = nominalState.waterDepth[i] || 0;
+    const hDis = disruptedState.waterDepth[i] || 0;
+    if (hNom > nominalMaxDepth) nominalMaxDepth = hNom;
+    if (hDis > disruptedMaxDepth) disruptedMaxDepth = hDis;
+
+    const rise = hDis - hNom;
+    if (rise >= 0.01) {
+      adverseCellCount++;
+      if (rise > peakAdverseDepthRiseM) peakAdverseDepthRiseM = rise;
+    } else if (rise <= -0.01) {
+      beneficialCellCount++;
+      const draw = Math.abs(rise);
+      if (draw > peakBeneficialDrawdownM) peakBeneficialDrawdownM = draw;
+    }
+  }
+
+  const nominalHospitals = evaluateHospitalAccess(dataset, nominalState.waterDepth);
+  const disruptedHospitals = evaluateHospitalAccess(dataset, disruptedState.waterDepth);
+
+  const nominalRoads = evaluateRoadPassability(dataset, nominalState.waterDepth);
+  const nominalImpassableIds = new Set(
+    nominalRoads.filter((r) => r.status === 'CRITICAL_IMPASSABLE').map((r) => r.roadId)
+  );
+  const nominalCautionOrWorseIds = new Set(
+    nominalRoads.filter((r) => r.status !== 'DRY_PASSABLE').map((r) => r.roadId)
+  );
+
+  const disruptedRoads = evaluateRoadPassability(dataset, disruptedState.waterDepth, nominalImpassableIds);
+  const newlyImpassableRoads = disruptedRoads.filter((r) => r.newlyImpassable);
+  const newlyCautionRoads = disruptedRoads.filter(
+    (r) => r.status === 'CAUTION_MINOR_PONDING' && !nominalCautionOrWorseIds.has(r.roadId)
+  );
+  const improvedRoads = disruptedRoads.filter(
+    (r) => r.status !== 'CRITICAL_IMPASSABLE' && nominalImpassableIds.has(r.roadId)
+  );
+
+  const newlyAtRiskHospitals = disruptedHospitals
+    .filter((h, idx) => h.status !== 'ACCESSIBLE' && nominalHospitals[idx].status === 'ACCESSIBLE')
+    .map((h) => h.name);
+
+  const affectedInletMetrics: AffectedInletDelta[] = activeDisruptions.map((d) => {
+    const idx = d.gridCell[0] * nx + d.gridCell[1];
+    const hNom = nominalState.waterDepth[idx] || 0;
+    const hDis = disruptedState.waterDepth[idx] || 0;
+    const nomDrain = nominalState.accounting.drainageByInletId?.[d.targetInletId] || 0;
+    const disDrain = disruptedState.accounting.drainageByInletId?.[d.targetInletId] || 0;
+    return {
+      disruptionId: d.id,
+      inletId: d.targetInletId,
+      targetName: d.targetName,
+      gridCell: d.gridCell,
+      blockageRatio: d.blockageRatio,
+      nominalCapacityM3PerSec: d.nominalCapacityM3PerSec,
+      effectiveCapacityM3PerSec: d.effectiveCapacityM3PerSec,
+      nominalDepthM: Math.round(hNom * 1000) / 1000,
+      disruptedDepthM: Math.round(hDis * 1000) / 1000,
+      depthChangeM: Math.round((hDis - hNom) * 1000) / 1000,
+      nominalDrainageM3: Math.round(nomDrain),
+      disruptedDrainageM3: Math.round(disDrain),
+      drainageLossM3: Math.round(nomDrain - disDrain)
+    };
+  });
+
+  const retainedWaterVolumeDeltaM3 = Math.round(
+    disruptedState.accounting.currentStorageM3 - nominalState.accounting.currentStorageM3
+  );
+  const lostDrainageVolumeM3 = Math.round(
+    nominalState.accounting.cumulativeDrainageM3 - disruptedState.accounting.cumulativeDrainageM3
+  );
+
+  const causalSummary =
+    activeDisruptions.length === 0
+      ? `Nominal unobstructed drainage configuration under ${schedule.name}. All three modelled drainage inlets operate at their nominal screening capacities with 0 active disruptions.`
+      : `${activeDisruptions.length} active drainage disruption(s) (${activeDisruptions.map((d) => d.targetInletId).join(', ')}) under ${schedule.name}. ` +
+        `Modelled surface storage increases by ${retainedWaterVolumeDeltaM3.toLocaleString()} m³ (${lostDrainageVolumeM3.toLocaleString()} m³ lost modelled inlet drainage), ` +
+        `producing depth increases ≥1 cm across ${adverseCellCount} grid cells (peak rise +${(peakAdverseDepthRiseM * 100).toFixed(1)} cm) ` +
+        `and ${newlyImpassableRoads.length} newly ≥30 cm road screening transition(s).`;
+
+  return {
+    profileId: schedule.id,
+    profileName: schedule.name,
+    activeDisruptionIds: activeDisruptions.map((d) => d.id),
+    activeDisruptions,
+    simulatedTimeSeconds: schedule.durationSeconds,
+    dtMacroSeconds: dtMacro,
+    nominal: {
+      cumulativeDrainageM3: Math.round(nominalState.accounting.cumulativeDrainageM3),
+      currentStorageM3: Math.round(nominalState.accounting.currentStorageM3),
+      maxWaterDepthM: Math.round(nominalMaxDepth * 1000) / 1000,
+      impassableRoadCount: nominalRoads.filter((r) => r.status === 'CRITICAL_IMPASSABLE').length,
+      cautionRoadCount: nominalRoads.filter((r) => r.status === 'CAUTION_MINOR_PONDING').length,
+      atRiskHospitalCount: nominalHospitals.filter((h) => h.status !== 'ACCESSIBLE').length,
+      roads: nominalRoads,
+      hospitals: nominalHospitals,
+      waterDepth: nominalState.waterDepth,
+      relativeConservationError: nominalState.accounting.relativeError
+    },
+    disrupted: {
+      cumulativeDrainageM3: Math.round(disruptedState.accounting.cumulativeDrainageM3),
+      currentStorageM3: Math.round(disruptedState.accounting.currentStorageM3),
+      maxWaterDepthM: Math.round(disruptedMaxDepth * 1000) / 1000,
+      impassableRoadCount: disruptedRoads.filter((r) => r.status === 'CRITICAL_IMPASSABLE').length,
+      cautionRoadCount: disruptedRoads.filter((r) => r.status === 'CAUTION_MINOR_PONDING').length,
+      atRiskHospitalCount: disruptedHospitals.filter((h) => h.status !== 'ACCESSIBLE').length,
+      roads: disruptedRoads,
+      hospitals: disruptedHospitals,
+      waterDepth: disruptedState.waterDepth,
+      relativeConservationError: disruptedState.accounting.relativeError
+    },
+    delta: {
+      retainedWaterVolumeDeltaM3,
+      lostDrainageVolumeM3,
+      maxWaterDepthDeltaM: Math.round((disruptedMaxDepth - nominalMaxDepth) * 1000) / 1000,
+      newlyImpassableRoads,
+      newlyCautionRoads,
+      improvedRoads,
+      newlyAtRiskHospitals,
+      adverseCellCount,
+      beneficialCellCount,
+      peakAdverseDepthRiseM: Math.round(peakAdverseDepthRiseM * 1000) / 1000,
+      peakBeneficialDrawdownM: Math.round(peakBeneficialDrawdownM * 1000) / 1000
+    },
+    affectedInletMetrics,
+    causalSummary
+  };
+}

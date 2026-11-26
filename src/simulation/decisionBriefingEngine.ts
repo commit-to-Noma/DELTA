@@ -171,9 +171,11 @@ export function computeScenarioHash(result: MultiScenarioEvaluationResult): stri
   const meta = result.simulationMetadata;
   const rawKey = [
     meta.profileId,
+    meta.disruptionId || 'CULVERT-01-BROOKLINE-BLOCKAGE',
     meta.totalRainfallMm.toFixed(2),
     meta.simulatedDurationSeconds,
     result.baseline.totalWaterVolumeM3.toFixed(1),
+    result.baseline.currentStorageM3.toFixed(1),
     result.baseline.maxWaterDepthM.toFixed(3),
     result.differentials['plan-alpha'].avoidedSurfaceVolumeM3.toFixed(1),
     result.differentials['plan-beta'].avoidedSurfaceVolumeM3.toFixed(1),
@@ -203,7 +205,8 @@ export function computeScenarioHash(result: MultiScenarioEvaluationResult): stri
 export function executeCrossProfileRobustnessEvaluation(
   dataset: BostonCatchmentDataset,
   dtMacro: number = 20.0,
-  maxDurationSeconds?: number
+  maxDurationSeconds?: number,
+  activeDisruptionIds: string[] = ['disruption-brookline-culvert']
 ): CrossProfileMatrixEntry[] {
   const profileIds = Object.keys(AUTHORITATIVE_STRESS_PROFILES);
   const matrix: CrossProfileMatrixEntry[] = [];
@@ -224,7 +227,8 @@ export function executeCrossProfileRobustnessEvaluation(
       dataset,
       profile,
       profile.rainfallIntensityMmPerHour ?? (profile.totalRainfallMm / profile.durationHours),
-      dtMacro
+      dtMacro,
+      activeDisruptionIds
     );
 
     const plansSummary: Record<'plan-alpha' | 'plan-beta' | 'plan-gamma', CrossProfilePlanSummary> = {
@@ -275,21 +279,24 @@ export function executeCrossProfileRobustnessEvaluation(
   return matrix;
 }
 
-let cachedCrossProfileMatrix: CrossProfileMatrixEntry[] | null = null;
+const cachedCrossProfileMatrices = new Map<string, CrossProfileMatrixEntry[]>();
 
 export function clearCrossProfileCache(): void {
-  cachedCrossProfileMatrix = null;
+  cachedCrossProfileMatrices.clear();
 }
 
 export function getOrComputeCrossProfileMatrix(
   dataset: BostonCatchmentDataset,
   dtMacro: number = 20.0,
-  maxDurationSeconds: number = 240.0
+  maxDurationSeconds: number = 240.0,
+  activeDisruptionIds: string[] = ['disruption-brookline-culvert']
 ): CrossProfileMatrixEntry[] {
-  if (!cachedCrossProfileMatrix) {
-    cachedCrossProfileMatrix = executeCrossProfileRobustnessEvaluation(dataset, dtMacro, maxDurationSeconds);
-  }
-  return cachedCrossProfileMatrix;
+  const key = `${dtMacro}|${maxDurationSeconds}|${[...activeDisruptionIds].sort().join(',')}`;
+  const existing = cachedCrossProfileMatrices.get(key);
+  if (existing) return existing;
+  const computed = executeCrossProfileRobustnessEvaluation(dataset, dtMacro, maxDurationSeconds, activeDisruptionIds);
+  cachedCrossProfileMatrices.set(key, computed);
+  return computed;
 }
 
 /**
@@ -420,8 +427,9 @@ export function generateDecisionBriefing(
     };
   });
 
-  // 6. Cross-Scenario Matrix (compute or retrieve cached)
-  const matrix = crossProfileMatrix ?? getOrComputeCrossProfileMatrix(dataset);
+  // 6. Cross-Scenario Matrix (compute or retrieve cached for exact disruption configuration)
+  const activeDisruptionIds = meta.activeDisruptionIds ?? ['disruption-brookline-culvert'];
+  const matrix = crossProfileMatrix ?? getOrComputeCrossProfileMatrix(dataset, 20.0, 240.0, activeDisruptionIds);
 
   const keyInsights: string[] = [
     `Evaluation covers 1 NOAA Atlas 14 regional benchmark (Station 19-0770, 104.2 mm) and ${matrix.length - 1} exploratory synthetic stress profiles.`,
@@ -481,7 +489,13 @@ export function generateDecisionBriefing(
       domainDimensionM: '1,600m x 1,600m (4,096 cells)',
       cellCount: 4096,
       disruptionId: meta.disruptionId,
-      culvertStatus: '100% Clogged / Impaired (0.0 m³/s baseline)'
+      culvertStatus:
+        activeDisruptionIds.length === 0
+          ? 'Nominal Unobstructed Screening Capacity (0 Active Disruptions)'
+          : activeDisruptionIds.includes('disruption-brookline-culvert')
+          ? 'CULVERT-01-BROOKLINE 100% Blocked (0.0 m³/s baseline)' +
+            (activeDisruptionIds.length > 1 ? ` + ${activeDisruptionIds.length - 1} additional disruption(s)` : '')
+          : `${activeDisruptionIds.length} Active Drainage Disruption(s): ${activeDisruptionIds.join(', ')}`
     },
     baselineAssessment: {
       totalSurfaceVolumeM3: evaluationResult.baseline.totalWaterVolumeM3,

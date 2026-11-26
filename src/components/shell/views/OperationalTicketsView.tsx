@@ -30,8 +30,16 @@ import {
   linkWorkOrderToIssue 
 } from '../../../simulation/workOrderEngine';
 import { invokeSafe } from '../../../services/forgeBridge';
+import { useIncidentWorkspace } from '../../../context/IncidentWorkspaceContext';
 
 export const OperationalTicketsView: React.FC = () => {
+  const {
+    refreshGovernanceRecords,
+    setSelectedCell,
+    setSelectedPlanId,
+    setSelectedWorkOrderId,
+    setActiveStage
+  } = useIncidentWorkspace();
   const [workOrders, setWorkOrders] = useState<OperationalWorkOrder[]>([]);
   const [selectedStage, setSelectedStage] = useState<'ALL' | WorkOrderStage>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -123,12 +131,13 @@ export const OperationalTicketsView: React.FC = () => {
     try {
       await invokeSafe('saveWorkOrder', { workOrder: updated });
     } catch {}
+    await refreshGovernanceRecords();
     setTimeout(() => setActionNotice(null), 5000);
   };
 
   // Bind work order to Jira issue key
   const handleBindJiraIssue = async (wo: OperationalWorkOrder) => {
-    const issueKey = (linkInputMap[wo.workOrderId] || 'JSM-4902').trim().toUpperCase();
+    const issueKey = (linkInputMap[wo.workOrderId] || 'EMERG-101').trim().toUpperCase();
     if (!issueKey) return;
 
     try {
@@ -156,7 +165,16 @@ export const OperationalTicketsView: React.FC = () => {
         setActionNotice(`Work order ${wo.workOrderId} bound to Jira issue ${issueKey}!`);
       }
     }
+    await refreshGovernanceRecords();
     setTimeout(() => setActionNotice(null), 5000);
+  };
+
+  const handleLocateOnMap = (wo: OperationalWorkOrder) => {
+    const [row, col] = wo.targetLocation.gridCell;
+    setSelectedPlanId(wo.planId);
+    setSelectedWorkOrderId(wo.workOrderId);
+    setSelectedCell({ row, col });
+    setActiveStage('interventions');
   };
 
   // Filtered work orders
@@ -339,6 +357,14 @@ export const OperationalTicketsView: React.FC = () => {
                     <span className="text-storm-300">
                       DECISION: <strong className="text-storm-100">{wo.decisionId}</strong>
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => handleLocateOnMap(wo)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-onyx-950 border border-onyx-700 hover:border-safety-orange text-[10px] font-mono text-cyan-300 hover:text-white transition-colors"
+                    >
+                      <MapPin className="w-3 h-3 text-safety-orange" />
+                      <span>Locate [{wo.targetLocation.gridCell[0]}, {wo.targetLocation.gridCell[1]}] on Map</span>
+                    </button>
                   </div>
                 </div>
 

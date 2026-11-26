@@ -1,200 +1,108 @@
-import React, { useState, useMemo, useEffect, useTransition, useCallback } from 'react';
-import { 
-  BarChart3, 
-  Sparkles, 
-  ShieldCheck, 
+/**
+ * DELTA Stage 03: Intervention Planning Workspace
+ *
+ * Map-first comparative decision lab evaluating Plan Alpha (Francis St Barrier),
+ * Plan Beta (Mobile Pump #1), and Plan Gamma (Brookline Culvert Jetting) against
+ * an identical baseline under the shared active rainfall profile and active disruptions.
+ *
+ * Features:
+ * - Synchronized Side-by-Side, Comparison Curtain, and Signed Δh Overlay canvas modes
+ * - Shared cell inspector displaying Baseline depth, Plan depth, and signed Δh = h_baseline - h_plan
+ * - Honest adverse local ponding warnings (e.g., Plan Alpha surcharge)
+ * - Discrete solver-derived temporal threshold screening (with explicit Δt resolution disclosure)
+ * - Human Commander Decision Authorization bound strictly to the active scenario
+ */
+
+import React, { useState, useEffect } from 'react';
+import {
+  ShieldCheck,
   ArrowRight,
-  TrendingDown,
-  Layers,
   RefreshCw,
-  Info,
-  CheckCircle2,
   AlertTriangle,
   X,
   Lock,
-  FileText,
-  Compass,
-  MapPin,
   CloudRain,
-  Check
+  AlertOctagon,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  CheckCircle2,
+  Droplets
 } from 'lucide-react';
-import { loadBostonCatchment } from '../../../data/catchmentLoader';
-import { 
-  AUTHORITATIVE_INTERVENTIONS, 
+import {
+  AUTHORITATIVE_INTERVENTIONS,
   AUTHORITATIVE_STRESS_PROFILES,
-  executeMultiScenarioEvaluation, 
-  MultiScenarioEvaluationResult,
-  InterventionDefinition,
-  HospitalImprovement,
-  StressProfile,
-  EffectivenessClassification
+  EffectivenessClassification,
+  InterventionDefinition
 } from '../../../simulation/interventionEngine';
+import { useIncidentWorkspace, PlanId } from '../../../context/IncidentWorkspaceContext';
 import { invokeSafe } from '../../../services/forgeBridge';
 import {
-  GeographicSimulationCanvas,
-  CellHoverInfo,
-  CanvasLayerVisibility,
-} from '../../simulation/GeographicSimulationCanvas';
+  SplitComparisonCanvas,
+  ComparisonViewMode
+} from '../../simulation/SplitComparisonCanvas';
+import { CanvasLayerDock } from '../../simulation/CanvasLayerDock';
 
 interface InterventionsViewProps {
   onNavigateToDecisions?: () => void;
 }
 
-interface ProfileOption {
-  id: string;
-  name: string;
-  shortLabel: string;
-  badge: string;
-  isRegionalBenchmark: boolean;
-  totalDepthMm: number;
-  durationLabel: string;
-  peakRateLabel: string;
+function formatSecondsCompact(seconds: number | null): string {
+  if (seconds === null) return 'Never';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (mins >= 60) {
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hrs}h ${remMins}m`;
+  }
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
-const PROFILE_OPTIONS: ProfileOption[] = [
-  {
-    id: 'reference-noaa-50yr',
-    name: 'NOAA Atlas 14 50-Year Regional Benchmark (6-Hour)',
-    shortLabel: 'NOAA 50-YR BENCHMARK',
-    badge: 'REGIONAL NOAA BENCHMARK',
-    isRegionalBenchmark: true,
-    totalDepthMm: 104.2,
-    durationLabel: '6.0 Hours',
-    peakRateLabel: '34.9 mm/h (Hour 3)',
-  },
-  {
-    id: 'synthetic-moderate-stress',
-    name: 'Synthetic Moderate Convective Event (1-Hour)',
-    shortLabel: 'MODERATE CONVECTIVE',
-    badge: 'SYNTHETIC STRESS',
-    isRegionalBenchmark: false,
-    totalDepthMm: 35.0,
-    durationLabel: '1.0 Hour',
-    peakRateLabel: '35.0 mm/h',
-  },
-  {
-    id: 'synthetic-high-intensity',
-    name: 'Synthetic High-Intensity Stress Burst (30-Min)',
-    shortLabel: 'HIGH-INTENSITY BURST',
-    badge: 'SYNTHETIC BURST',
-    isRegionalBenchmark: false,
-    totalDepthMm: 37.5,
-    durationLabel: '30 Minutes',
-    peakRateLabel: '75.0 mm/h',
-  },
-  {
-    id: 'synthetic-low-intensity',
-    name: 'Synthetic Low-Intensity Sensitivity Test (1-Hour)',
-    shortLabel: 'LOW-INTENSITY SENSITIVITY',
-    badge: 'SYNTHETIC SENSITIVITY',
-    isRegionalBenchmark: false,
-    totalDepthMm: 15.0,
-    durationLabel: '1.0 Hour',
-    peakRateLabel: '15.0 mm/h',
-  },
-];
+export const InterventionsView: React.FC<InterventionsViewProps> = ({
+  onNavigateToDecisions
+}) => {
+  const {
+    dataset,
+    setActiveStage,
+    activeProfileId,
+    activeProfile,
+    setActiveProfileId,
+    activeDisruptionIds,
+    activeDisruptions,
+    selectedPlanId,
+    setSelectedPlanId,
+    evaluationResult,
+    isComputingEvaluation,
+    evaluationError,
+    activeScenarioHash,
+    recomputeActiveScenario,
+    workOrders,
+    canvasLayers,
+    toggleCanvasLayer,
+    selectedCell,
+    setSelectedCell,
+    selectedRoadId,
+    setSelectedRoadId,
+    selectedFacilityId,
+    setSelectedFacilityId,
+    registerNewDecision,
+    refreshGovernanceRecords
+  } = useIncidentWorkspace();
 
-export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigateToDecisions }) => {
-  const dataset = useMemo(() => loadBostonCatchment(), []);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('reference-noaa-50yr');
-  const [selectedPlanId, setSelectedPlanId] = useState<'plan-alpha' | 'plan-beta' | 'plan-gamma'>('plan-gamma');
-  const [evaluationCache, setEvaluationCache] = useState<Record<string, MultiScenarioEvaluationResult>>({});
-  const [evaluationResult, setEvaluationResult] = useState<MultiScenarioEvaluationResult | null>(null);
-  const [isRunningEvaluation, setIsRunningEvaluation] = useState<boolean>(false);
-  const [, startTransition] = useTransition();
+  const [comparisonMode, setComparisonMode] = useState<ComparisonViewMode>('side-by-side');
+  const [showFullComparisonDrawer, setShowFullComparisonDrawer] = useState<boolean>(false);
+  const [showTemporalSection, setShowTemporalSection] = useState<boolean>(true);
 
+  // Commander Approval Modal State
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState<boolean>(false);
   const [engineeringRationale, setEngineeringRationale] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvedRecord, setApprovedRecord] = useState<any | null>(null);
 
-  // Centerpiece Canvas State for Intervention Visual Evaluation
-  const [canvasLayers, setCanvasLayers] = useState<CanvasLayerVisibility>({
-    satellite: true,
-    terrain: false,
-    contours: false,
-    water: true,
-    vectors: false,
-    roads: true,
-    facilities: true,
-    drainage: true,
-    legend: true,
-  });
-  const [mapViewMode, setMapViewMode] = useState<'standard' | 'delta'>('delta');
-  const [inspectedCell, setInspectedCell] = useState<CellHoverInfo | null>(null);
-  const [selectedRoadId, setSelectedRoadId] = useState<string | null>(null);
-  const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
-
-  const activeProfile: StressProfile = AUTHORITATIVE_STRESS_PROFILES[selectedProfileId] || AUTHORITATIVE_STRESS_PROFILES['reference-noaa-50yr'];
-  const activeOption = PROFILE_OPTIONS.find((p) => p.id === selectedProfileId);
-
-  const toggleCanvasLayer = (layer: keyof CanvasLayerVisibility) => {
-    setCanvasLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
-  };
-
-  // Run solver evaluation across all 4 scenarios (Baseline + 3 Plans) for a given profile
-  const runEvaluationForProfile = useCallback((profileId: string, forceRerun = false) => {
-    if (!forceRerun && evaluationCache[profileId]) {
-      setEvaluationResult(evaluationCache[profileId]);
-      return;
-    }
-
-    setIsRunningEvaluation(true);
-    const timer = setTimeout(() => {
-      startTransition(() => {
-        const targetProfile = AUTHORITATIVE_STRESS_PROFILES[profileId] || AUTHORITATIVE_STRESS_PROFILES['reference-noaa-50yr'];
-        // For the 6-hour piecewise profile (21600s), dtMacro=30.0 runs deterministically and smoothly
-        const dtMacro = targetProfile.durationSeconds > 7200 ? 30.0 : 20.0;
-        const result = executeMultiScenarioEvaluation(dataset, targetProfile, 0, dtMacro);
-
-        setEvaluationCache((prev) => ({ ...prev, [profileId]: result }));
-        setEvaluationResult(result);
-        setIsRunningEvaluation(false);
-      });
-    }, 40);
-
-    return () => clearTimeout(timer);
-  }, [dataset, evaluationCache]);
-
-  // Initial load on mount
-  useEffect(() => {
-    runEvaluationForProfile('reference-noaa-50yr');
-  }, [runEvaluationForProfile]);
-
-  // Handle switching storm profiles
-  const handleSelectProfile = (profileId: string) => {
-    if (isRunningEvaluation || profileId === selectedProfileId) return;
-    setSelectedProfileId(profileId);
-    runEvaluationForProfile(profileId);
-  };
-
-  // Set default engineering rationale when plan or profile changes
-  useEffect(() => {
-    if (selectedPlanId === 'plan-gamma') {
-      setEngineeringRationale(
-        `Plan Gamma (Emergency Culvert Jetting) is selected under ${activeProfile.name}. ` +
-        `The simulation models clearing the Brookline culvert choke to restore 12.5 m³/s nominal capacity. ` +
-        `Note: The Brookline culvert is represented as an unrouted point drainage sink on the elevated road deck (7.51m NAVD88). ` +
-        `These results are DELTA screening-model outputs (≥50 m³ benefit threshold) and do not guarantee field flood protection.`
-      );
-    } else if (selectedPlanId === 'plan-beta') {
-      setEngineeringRationale(
-        `Plan Beta (Mobile Pump #1) is authorized under ${activeProfile.name}. ` +
-        `Deploys high-capacity mobile diesel pump at retention channel [17, 25] operating at 2.0 m³/s active dewatering. ` +
-        `Model evaluates capacity limits against sustained inflow.`
-      );
-    } else {
-      setEngineeringRationale(
-        `Plan Alpha (Francis St Barrier) is reviewed under ${activeProfile.name}. ` +
-        `Erects +0.50m rapid sandbag barriers along Francis St ambulance bay. ` +
-        `Evaluation acknowledges trade-off: localized flow diversion causes water to pond on adjacent terrain cells without reducing catchment flood storage.`
-      );
-    }
-  }, [selectedPlanId, activeProfile.name]);
-
   const selectedPlanDef: InterventionDefinition = AUTHORITATIVE_INTERVENTIONS[selectedPlanId];
-  const selectedDiff = evaluationResult?.differentials[selectedPlanId];
+  const selectedDiff = evaluationResult?.differentials[selectedPlanId] || null;
   const selectedPlanMetrics = evaluationResult
     ? selectedPlanId === 'plan-alpha'
       ? evaluationResult.planAlpha
@@ -203,1046 +111,647 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({ onNavigate
       : evaluationResult.planGamma
     : null;
 
-  // Render classification badge with strict precedence styling
+  // Keep default engineering rationale synchronized with selected plan + active profile + disruptions
+  useEffect(() => {
+    const disruptionLabel =
+      activeDisruptions.length === 0
+        ? 'nominal unobstructed drainage'
+        : activeDisruptions.map((d) => d.targetInletId).join(', ') + ' disruption(s)';
+
+    if (selectedPlanId === 'plan-gamma') {
+      setEngineeringRationale(
+        `Plan Gamma (Emergency Culvert Jetting) evaluated under ${activeProfile.name} with ${disruptionLabel}. ` +
+        `Models clearing CULVERT-01-BROOKLINE to 12.5 m³/s nominal heuristic capacity. ` +
+        `Disclosed limitation: culvert is represented as a road-deck point sink at cell [17, 26] (7.51m NAVD88), not a coupled 1D barrel.`
+      );
+    } else if (selectedPlanId === 'plan-beta') {
+      setEngineeringRationale(
+        `Plan Beta (Mobile Pump #1) evaluated under ${activeProfile.name} with ${disruptionLabel}. ` +
+        `Models a 2.0 m³/s mass-conserving point suction sink at retention channel [17, 25], subject to physical inflow capacity limits.`
+      );
+    } else {
+      setEngineeringRationale(
+        `Plan Alpha (Francis St Barrier) evaluated under ${activeProfile.name} with ${disruptionLabel}. ` +
+        `Models +0.50m surface crest barriers along Francis St cells. Evaluation explicitly acknowledges localized adverse deflection ponding on adjacent cells without reducing catchment-wide storage.`
+      );
+    }
+  }, [selectedPlanId, activeProfile.name, activeDisruptions]);
+
   const renderClassificationBadge = (classification: EffectivenessClassification) => {
     switch (classification) {
       case 'ADVERSE_LOCAL_DEFLECTION':
         return (
-          <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-600 text-[10px] font-bold tracking-wide">
+          <span className="px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-600/70 text-[9px] font-mono font-bold">
             ADVERSE DEFLECTION
           </span>
         );
       case 'CAPACITY_CONSTRAINED':
         return (
-          <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-600 text-[10px] font-bold tracking-wide">
+          <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/70 text-[9px] font-mono font-bold">
             CAPACITY CONSTRAINED
           </span>
         );
       case 'MEASURABLE_BENEFIT':
         return (
-          <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-600 text-[10px] font-bold tracking-wide">
+          <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/70 text-[9px] font-mono font-bold">
             MEASURABLE BENEFIT
           </span>
         );
       case 'NEGLIGIBLE_IMPACT':
         return (
-          <span className="px-2 py-0.5 rounded bg-onyx-800 text-storm-300 border border-onyx-700 text-[10px] font-bold tracking-wide">
+          <span className="px-1.5 py-0.5 rounded bg-onyx-800 text-storm-300 border border-onyx-700 text-[9px] font-mono font-bold">
             NEGLIGIBLE IMPACT
           </span>
         );
-      case 'INCONCLUSIVE_NO_EFFECTIVE_PLAN':
+      default:
         return (
-          <span className="px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-700 text-[10px] font-bold tracking-wide">
+          <span className="px-1.5 py-0.5 rounded bg-onyx-800 text-storm-400 border border-onyx-700 text-[9px] font-mono font-bold">
             INCONCLUSIVE
           </span>
         );
-      default:
-        return null;
+    }
+  };
+
+  const planShortLabel =
+    selectedPlanId === 'plan-alpha'
+      ? 'Plan Alpha (Barrier)'
+      : selectedPlanId === 'plan-beta'
+      ? 'Plan Beta (Mobile Pump)'
+      : 'Plan Gamma (Culvert Jetting)';
+
+  const handleProceedToBriefing = () => {
+    if (onNavigateToDecisions) onNavigateToDecisions();
+    else setActiveStage('briefing');
+  };
+
+  const handleConfirmDecision = async () => {
+    if (!evaluationResult || !selectedDiff || !selectedPlanMetrics || !activeScenarioHash) return;
+    setIsSubmitting(true);
+    setApprovalError(null);
+
+    const payload = {
+      chosenPlan: {
+        planId: selectedPlanDef.id,
+        name: selectedPlanDef.name,
+        type: selectedPlanDef.type
+      },
+      canonicalScenario: {
+        stormId: activeProfile.id,
+        stormLabel: activeProfile.name,
+        stormDepthMm: activeProfile.totalRainfallMm,
+        durationHours: activeProfile.durationHours,
+        disruptionId: evaluationResult.simulationMetadata.disruptionId,
+        activeDisruptionIds: evaluationResult.simulationMetadata.activeDisruptionIds,
+        briefingScenarioHash: activeScenarioHash,
+        cellResolutionM: 25.0,
+        gridDimensions: '64x64',
+        infiltrationRateMmPerHour: 2.0,
+        manningN: 0.025,
+        sector: 'Boston Longwood Medical Area & Muddy River Catchment (EPSG:26986)',
+        provenance: activeProfile.provenance
+      },
+      baselineMetrics: {
+        currentStorageM3: evaluationResult.baseline.currentStorageM3,
+        maxWaterDepthM: evaluationResult.baseline.maxWaterDepthM,
+        impassableRoadCount: evaluationResult.baseline.impassableRoadCount
+      },
+      interventionMetrics: {
+        currentStorageM3: selectedPlanMetrics.currentStorageM3,
+        maxWaterDepthM: selectedPlanMetrics.maxWaterDepthM,
+        impassableRoadCount: selectedPlanMetrics.impassableRoadCount
+      },
+      differentialMetrics: {
+        avoidedSurfaceVolumeM3: selectedDiff.avoidedSurfaceVolumeM3,
+        peakDepthReductionM: selectedDiff.peakDepthReductionM,
+        protectedRoadCount: selectedDiff.protectedRoadCount,
+        protectedRoadNames: selectedDiff.protectedRoadNames
+      },
+      engineeringRationale: engineeringRationale.trim(),
+      schemaVersion: '2.0.0',
+      humanApprover: {
+        displayName: 'Duty Incident Commander',
+        role: 'Incident Commander'
+      }
+    };
+
+    try {
+      const res: any = await invokeSafe('recordDecision', payload);
+      if (res && res.success) {
+        const saved = res.data || res.record || {
+          ...payload,
+          decisionId: `DEC-${activeScenarioHash.replace('0X', '').slice(0, 8)}`,
+          scenarioHash: activeScenarioHash,
+          status: 'APPROVED',
+          createdAt: new Date().toISOString()
+        };
+        setApprovedRecord(saved);
+        registerNewDecision(saved);
+        await refreshGovernanceRecords();
+        setIsApprovalModalOpen(false);
+      } else {
+        setApprovalError(res?.error?.message || res?.message || 'Server rejected decision record approval.');
+      }
+    } catch (err: any) {
+      setApprovalError(err?.message || String(err));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner & Scientific Screening Notice */}
-      <div className="bg-onyx-900 border-l-4 border-safety-orange p-4 rounded-r border-y border-r border-onyx-800 flex items-start gap-3">
-        <Info className="w-5 h-5 text-safety-orange flex-shrink-0 mt-0.5" />
-        <div className="text-xs font-mono text-storm-300 space-y-1">
-          <div className="font-bold text-storm-100 uppercase tracking-wider flex items-center gap-2">
-            <span>MULTI-SCENARIO INTERVENTION PLANNER // 2D DIFFUSIVE-WAVE SOLVER PIPELINE</span>
-            <span className="text-[10px] px-2 py-0.5 rounded bg-onyx-800 text-storm-300 border border-onyx-700">
-              WORKSTREAM 3B OPERATIONAL
+    <div className="flex flex-col gap-3 h-full">
+      {/* Compact Top Scenario & Plan Selection Strip */}
+      <div className="bg-onyx-900 border border-onyx-800 rounded px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Synchronized Rainfall Profile */}
+          <div className="flex items-center gap-1.5">
+            <CloudRain className="w-3.5 h-3.5 text-cyan-400" />
+            <select
+              aria-label="Intervention evaluation rainfall profile"
+              value={activeProfileId}
+              onChange={(e) => setActiveProfileId(e.target.value)}
+              disabled={isComputingEvaluation}
+              className="bg-onyx-950 border border-onyx-700 rounded px-2 py-1 text-[11px] font-mono text-storm-100 focus:outline-none focus:border-safety-orange max-w-[260px]"
+            >
+              {Object.values(AUTHORITATIVE_STRESS_PROFILES).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Active Disruption State Pill (Linked to Stage 02) */}
+          <button
+            type="button"
+            onClick={() => setActiveStage('simulation')}
+            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono transition-colors ${
+              activeDisruptionIds.length > 0
+                ? 'bg-safety-orange/15 border-safety-orange/40 text-safety-orange hover:border-safety-orange'
+                : 'bg-emerald-950/40 border-emerald-800/50 text-emerald-300 hover:border-emerald-600'
+            }`}
+            title="Edit drainage disruption configuration in Stage 02"
+          >
+            <AlertOctagon className="w-3 h-3" />
+            <span>
+              {activeDisruptionIds.length > 0
+                ? `${activeDisruptionIds.length} Disruption(s) Applied`
+                : 'Nominal Drainage (0 Disruptions)'}
             </span>
-          </div>
-          <p className="text-storm-300 font-sans">
-            Every candidate intervention is simulated against an <strong>invariant baseline storm</strong> with identical dry bare-earth initial conditions ($h = 0$).
-            Comparative metrics (avoided surface flood volume, incremental drainage, spatial deflection, and road passability) are derived strictly from 2D solver outputs.
-          </p>
-          <div className="text-[11px] text-amber-300 font-mono pt-1">
-            * Screening simulation model results for municipal decision support. DELTA uses a ≥50 m³ avoided volume screening threshold (not an empirical statutory standard).
-          </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={recomputeActiveScenario}
+            disabled={isComputingEvaluation}
+            className="p-1.5 rounded bg-onyx-950 hover:bg-onyx-800 border border-onyx-700 text-storm-300 disabled:opacity-50"
+            title="Recompute baseline and all 3 plans"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isComputingEvaluation ? 'animate-spin text-cyan-400' : ''}`} />
+          </button>
+        </div>
+
+        {/* Right Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!evaluationResult || isComputingEvaluation}
+            onClick={() => {
+              setApprovalError(null);
+              setIsApprovalModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-onyx-800 hover:bg-onyx-700 border border-safety-orange/60 text-white text-[11px] font-mono font-bold transition-colors disabled:opacity-50"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-safety-orange" />
+            <span>Authorize {selectedPlanId.replace('plan-', 'Plan ').toUpperCase()}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleProceedToBriefing}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white text-xs font-mono font-bold transition-colors"
+          >
+            <span>Decision &amp; Briefing</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      {/* Meteorological Stress Profile Selector */}
-      <div className="bg-onyx-900 border border-onyx-800 rounded-lg p-4 font-mono text-xs space-y-3 shadow-tactical">
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-onyx-800">
-          <div className="flex items-center gap-2">
-            <CloudRain className="w-4 h-4 text-safety-orange" />
-            <span className="font-bold text-storm-100 uppercase tracking-wider text-xs">
-              METEOROLOGICAL STRESS PROFILE SELECTOR
-            </span>
-            <span className="text-[10px] px-2 py-0.5 rounded bg-onyx-950 text-storm-300 border border-onyx-800 font-bold">
-              4 PROFILES
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => runEvaluationForProfile(selectedProfileId, true)}
-              disabled={isRunningEvaluation}
-              className="px-3 py-1.5 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-200 border border-onyx-700 text-[11px] font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
-              title="Force full recomputation of 4 scenarios"
-            >
-              <RefreshCw className={`w-3 h-3 ${isRunningEvaluation ? 'animate-spin' : ''}`} />
-              <span>{isRunningEvaluation ? 'SOLVER RUNNING...' : 'RECALCULATE SCENARIOS'}</span>
-            </button>
-          </div>
-        </div>
+      {/* Candidate Plan Selector Tabs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        {(['plan-alpha', 'plan-beta', 'plan-gamma'] as PlanId[]).map((pid) => {
+          const def = AUTHORITATIVE_INTERVENTIONS[pid];
+          const diff = evaluationResult?.differentials[pid];
+          const isSelected = selectedPlanId === pid;
+          const isRecommended = evaluationResult?.ranking.recommendedPlanId === pid;
 
-        {/* 4 Profile Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {PROFILE_OPTIONS.map((opt) => {
-            const isSelected = selectedProfileId === opt.id;
-            return (
-              <div
-                key={opt.id}
-                onClick={() => handleSelectProfile(opt.id)}
-                className={`p-3 rounded-lg border cursor-pointer font-mono text-xs space-y-2 transition-all relative ${
-                  isSelected
-                    ? 'bg-onyx-850 border-safety-orange ring-1 ring-safety-orange shadow-safety'
-                    : 'bg-onyx-950 border-onyx-800 hover:border-onyx-700 hover:bg-onyx-900'
-                } ${isRunningEvaluation ? 'opacity-60 cursor-not-allowed' : ''}`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                    opt.isRegionalBenchmark
-                      ? 'bg-blue-950 text-blue-300 border-blue-700'
-                      : 'bg-onyx-800 text-storm-300 border-onyx-700'
-                  }`}>
-                    {opt.badge}
-                  </span>
-                  {isSelected && (
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-safety-orange">
-                      <Check className="w-3 h-3" />
-                      <span>ACTIVE</span>
+          return (
+            <button
+              key={pid}
+              type="button"
+              onClick={() => setSelectedPlanId(pid)}
+              className={`text-left px-3 py-2 rounded border transition-colors ${
+                isSelected
+                  ? 'bg-onyx-850 border-safety-orange ring-1 ring-safety-orange/40'
+                  : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs font-bold text-white truncate">
+                  {def.name.split(':')[0]}
+                </span>
+                <div className="flex items-center gap-1">
+                  {isRecommended && (
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/60 text-[9px] font-mono font-bold">
+                      RANK #1
                     </span>
                   )}
-                </div>
-
-                <div className="font-bold text-storm-100 text-xs tracking-tight line-clamp-1">
-                  {opt.shortLabel}
-                </div>
-
-                <div className="space-y-1 text-[11px] text-storm-300 border-t border-onyx-800/80 pt-1.5">
-                  <div className="flex justify-between">
-                    <span className="text-storm-500">Total Depth:</span>
-                    <strong className="text-storm-100">{opt.totalDepthMm.toFixed(1)} mm</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-storm-500">Duration:</span>
-                    <span className="text-storm-200">{opt.durationLabel}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-storm-500">Peak Rate:</span>
-                    <span className="text-storm-200">{opt.peakRateLabel}</span>
-                  </div>
+                  {diff && renderClassificationBadge(diff.classification)}
                 </div>
               </div>
-            );
-          })}
-        </div>
-
-        {/* Selected Profile Provenance & Disclosures Strip */}
-        <div className="bg-onyx-950 p-2.5 rounded border border-onyx-850 text-[11px] font-sans text-storm-300 flex items-start gap-2">
-          <Info className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <div>
-              <strong className="text-storm-100 font-mono text-[10px] uppercase">{activeProfile.name}:</strong>{' '}
-              {activeProfile.provenance}
-            </div>
-            {activeProfile.disclosures.map((disc, idx) => (
-              <div key={idx} className="text-storm-400 text-[10.5px]">
-                • {disc}
+              <div className="text-[11px] text-storm-300 truncate mt-0.5">
+                {def.name.split(':')[1]?.trim() || def.targetInfrastructure}
               </div>
-            ))}
-          </div>
-        </div>
+              {diff ? (
+                <div className="flex items-center justify-between gap-2 mt-1.5 text-[10px] font-mono">
+                  <span className={diff.avoidedSurfaceVolumeM3 > 0 ? 'text-emerald-400 font-bold' : 'text-storm-400'}>
+                    {diff.avoidedSurfaceVolumeM3 >= 0 ? '+' : ''}
+                    {diff.avoidedSurfaceVolumeM3.toLocaleString()} m³ avoided
+                  </span>
+                  <span className={diff.spatialDeflection.adverseCellCount > 0 ? 'text-amber-300 font-bold' : 'text-storm-400'}>
+                    {diff.spatialDeflection.adverseCellCount > 0
+                      ? `⚠ +${(diff.spatialDeflection.maxAdverseDepthIncreaseM * 100).toFixed(1)}cm rise (${diff.spatialDeflection.adverseCellCount} cells)`
+                      : '0 adverse cells'}
+                  </span>
+                </div>
+              ) : (
+                <div className="text-[10px] font-mono text-storm-500 mt-1.5">Computing...</div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Recalculation Loading State Overlay Banner */}
-      {isRunningEvaluation && (
-        <div className="bg-onyx-900 border border-safety-orange p-3.5 rounded-lg font-mono text-xs flex items-center justify-center gap-3 text-safety-orange animate-pulse shadow-tactical">
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          <span>RECOMPUTING 2D SOLVER FOR {activeProfile.name.toUpperCase()} (4 SCENARIOS: BASELINE, ALPHA, BETA, GAMMA)...</span>
+      {/* Confirmation Banner after Approval */}
+      {approvedRecord && (
+        <div className="bg-emerald-950/40 border border-emerald-700/60 rounded px-3.5 py-2 flex items-center justify-between gap-3 text-xs font-mono text-emerald-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span>
+              Decision <strong>{approvedRecord.decisionId}</strong> recorded for{' '}
+              <strong>{approvedRecord.chosenPlan?.name}</strong>.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleProceedToBriefing}
+            className="text-emerald-300 hover:text-white underline font-bold"
+          >
+            Inspect in Decision &amp; Briefing →
+          </button>
         </div>
       )}
 
-      {/* 4-Scenario Comparative Matrix Grid */}
-      {evaluationResult ? (
-        <div className="space-y-5">
-          {/* Baseline Crisis Reference Strip */}
-          <div className="bg-onyx-900 p-4 rounded-lg border border-red-900/60 font-mono text-xs flex flex-wrap items-center justify-between gap-4 shadow-tactical">
-            <div className="flex items-center gap-3">
-              <span className="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-bold">
-                UNMITIGATED BASELINE
-              </span>
-              <span className="text-storm-100 font-bold text-sm">Brookline Culvert Debris Choke</span>
-              <span className="text-storm-400 text-xs hidden sm:inline">({activeProfile.name})</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs">
-              <div><span className="text-storm-400">Total Rain:</span> <strong className="text-storm-200">{evaluationResult.baseline.totalWaterVolumeM3.toLocaleString()} m³</strong></div>
-              <div><span className="text-storm-400">Flood Storage:</span> <strong className="text-red-400">{evaluationResult.baseline.currentStorageM3.toLocaleString()} m³</strong></div>
-              <div><span className="text-storm-400">Peak Depth:</span> <strong className="text-red-400">{evaluationResult.baseline.maxWaterDepthM.toFixed(2)} m</strong></div>
-              <div><span className="text-storm-400">Background Drainage:</span> <strong className="text-blue-400">{evaluationResult.baseline.cumulativeDrainageM3.toLocaleString()} m³</strong></div>
-              <div><span className="text-storm-400">Impassable Roads:</span> <strong className="text-red-400">{evaluationResult.baseline.impassableRoadCount}</strong></div>
-              <div><span className="text-storm-400">Hospitals at Risk:</span> <strong className="text-red-400">{evaluationResult.baseline.atRiskHospitalCount}</strong></div>
-            </div>
-          </div>
-
-          {/* 3 Candidate Rescue Plans (Clean 3-Column Layout) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* 1. Plan Alpha */}
-            <div 
-              onClick={() => setSelectedPlanId('plan-alpha')}
-              className={`p-5 rounded-lg border cursor-pointer font-mono text-xs space-y-3 transition-all ${
-                selectedPlanId === 'plan-alpha'
-                  ? 'bg-onyx-850 border-safety-orange shadow-safety ring-1 ring-safety-orange'
-                  : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
-              }`}
-            >
-              <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-                <span className="font-bold text-storm-200 uppercase text-sm">PLAN ALPHA</span>
-                {renderClassificationBadge(evaluationResult.differentials.planAlpha.classification)}
-              </div>
-              <div className="text-base font-bold text-storm-100">Sandbag Barrier</div>
-              <p className="text-xs text-storm-400 font-sans leading-relaxed">
-                +0.50m crest barrier on Francis St. Deflects water around Brigham &amp; Women's bay.
-              </p>
-
-              {/* Adverse Deflection Notice on Card */}
-              {evaluationResult.differentials.planAlpha.spatialDeflection.adverseCellCount > 0 && (
-                <div className="p-2 rounded bg-amber-950/60 border border-amber-800/80 text-[11px] text-amber-300 flex items-center justify-between">
-                  <span className="flex items-center gap-1 font-bold">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-                    <span>Adverse Local Ponding:</span>
-                  </span>
-                  <span className="font-bold">
-                    +{(evaluationResult.differentials.planAlpha.spatialDeflection.maxAdverseDepthIncreaseM * 100).toFixed(1)} cm
-                  </span>
-                </div>
-              )}
-
-              <div className="space-y-2 pt-2 text-xs border-t border-onyx-800/60">
-                <div className="flex justify-between">
-                  <span className="text-storm-400">Water Avoided:</span>
-                  <span className="text-storm-200 font-bold">
-                    {evaluationResult.differentials.planAlpha.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}
-                    {evaluationResult.differentials.planAlpha.avoidedSurfaceVolumeM3.toLocaleString()} m³
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-storm-400">Roads Protected:</span>
-                  <span className="text-storm-200 font-bold">
-                    {evaluationResult.differentials.planAlpha.protectedRoadCount} Corridors
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-storm-400">Deflected Volume:</span>
-                  <span className="text-amber-400 font-bold">
-                    {evaluationResult.differentials.planAlpha.spatialDeflection.deflectedVolumeM3.toLocaleString()} m³
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Plan Beta */}
-            <div 
-              onClick={() => setSelectedPlanId('plan-beta')}
-              className={`p-5 rounded-lg border cursor-pointer font-mono text-xs space-y-3 transition-all ${
-                selectedPlanId === 'plan-beta'
-                  ? 'bg-onyx-850 border-safety-orange shadow-safety ring-1 ring-safety-orange'
-                  : 'bg-onyx-900 border-onyx-800 hover:border-onyx-700'
-              }`}
-            >
-              <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
-                <span className="font-bold text-storm-200 uppercase text-sm">PLAN BETA</span>
-                {renderClassificationBadge(evaluationResult.differentials.planBeta.classification)}
-              </div>
-              <div className="text-base font-bold text-storm-100">Mobile Pump #1</div>
-              <p className="text-xs text-storm-400 font-sans leading-relaxed">
-                2.0 m³/s high-capacity suction pump deployed to Muddy River retention basin ([17, 25]).
-              </p>
-
-              <div className="space-y-2 pt-2 text-xs border-t border-onyx-800/60">
-                <div className="flex justify-between">
-                  <span className="text-storm-400">Water Avoided:</span>
-                  <span className="text-safety-orange font-bold text-sm">
-                    +{evaluationResult.differentials.planBeta.avoidedSurfaceVolumeM3.toLocaleString()} m³
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-storm-400">Pump Siphoned:</span>
-                  <span className="text-blue-300 font-bold">
-                    {evaluationResult.differentials.planBeta.inletDrainageAccounting.interventionSinkExtractionM3.toLocaleString()} m³
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-storm-400">Roads Protected:</span>
-                  <span className="text-emerald-400 font-bold">
-                    {evaluationResult.differentials.planBeta.protectedRoadCount} Corridors
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Plan Gamma */}
-            <div 
-              onClick={() => setSelectedPlanId('plan-gamma')}
-              className={`p-5 rounded-lg border cursor-pointer font-mono text-xs space-y-3 transition-all ${
-                selectedPlanId === 'plan-gamma'
-                  ? 'bg-emerald-950/30 border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.25)] ring-2 ring-emerald-500'
-                  : 'bg-onyx-900 border-emerald-900/60 hover:border-emerald-700'
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-1 pb-2 border-b border-onyx-800">
-                <span className="font-bold text-emerald-300 uppercase text-xs sm:text-sm">PLAN GAMMA</span>
-                {renderClassificationBadge(evaluationResult.differentials.planGamma.classification)}
-              </div>
-              <div className="text-base font-bold text-emerald-400">Emergency Culvert Jetting</div>
-              <p className="text-xs text-storm-300 font-sans leading-relaxed">
-                Hydro-jetting crew clears Brookline culvert choke, restoring 12.5 m³/s nominal capacity.
-              </p>
-
-              <div className="space-y-2 pt-2 text-xs border-t border-onyx-800/60">
-                <div className="flex justify-between items-center">
-                  <span className="text-storm-300">Water Avoided:</span>
-                  <span className="text-emerald-400 font-bold text-sm">
-                    +{evaluationResult.differentials.planGamma.avoidedSurfaceVolumeM3.toLocaleString()} m³
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-storm-300">Culvert Drained:</span>
-                  <span className="text-emerald-300 font-bold">
-                    {evaluationResult.differentials.planGamma.inletDrainageAccounting.interventionSinkExtractionM3.toLocaleString()} m³
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-storm-300">Roads Protected:</span>
-                  <span className="text-emerald-400 font-bold">
-                    {evaluationResult.differentials.planGamma.protectedRoadCount} Corridors
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Plan Alpha Specific Adverse Deflection Banner (When Alpha is Selected) */}
-      {selectedPlanId === 'plan-alpha' && selectedDiff && selectedDiff.spatialDeflection.adverseCellCount > 0 && (
-        <div className="bg-amber-950/40 border border-amber-600/80 p-4 rounded-lg font-mono text-xs space-y-3 shadow-tactical">
-          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-            <span>ADVERSE LOCAL RUNOFF DEFLECTION DETECTED // PLAN ALPHA TRADE-OFF</span>
-          </div>
-          <p className="text-storm-200 font-sans leading-relaxed text-xs">
-            While the sandbag barrier deflects water away from the immediate Francis St ambulance ingress bay, surface runoff is diverted onto adjacent terrain cells, causing localized adverse water rise.
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-[11px]">
-            <div className="bg-onyx-950/90 p-2.5 rounded border border-amber-800/60">
-              <span className="text-storm-400 block text-[10px]">Peak Adverse Rise:</span>
-              <span className="text-amber-300 font-bold text-base">
-                +{(selectedDiff.spatialDeflection.maxAdverseDepthIncreaseM * 100).toFixed(1)} cm
-              </span>
-            </div>
-            <div className="bg-onyx-950/90 p-2.5 rounded border border-amber-800/60">
-              <span className="text-storm-400 block text-[10px]">Adverse Cells:</span>
-              <span className="text-amber-300 font-bold text-base">
-                {selectedDiff.spatialDeflection.adverseCellCount} cells
-              </span>
-            </div>
-            <div className="bg-onyx-950/90 p-2.5 rounded border border-amber-800/60">
-              <span className="text-storm-400 block text-[10px]">Affected Area:</span>
-              <span className="text-amber-300 font-bold text-base">
-                {selectedDiff.spatialDeflection.adverseAreaM2.toLocaleString()} m²
-              </span>
-            </div>
-            <div className="bg-onyx-950/90 p-2.5 rounded border border-amber-800/60">
-              <span className="text-storm-400 block text-[10px]">Deflected Volume:</span>
-              <span className="text-amber-300 font-bold text-base">
-                {selectedDiff.spatialDeflection.deflectedVolumeM3.toLocaleString()} m³
-              </span>
-            </div>
-          </div>
-          <div className="text-[10.5px] text-amber-300/90 pt-1 border-t border-amber-800/60 font-sans">
-            * <strong>Engineering Trade-off:</strong> Sandbag diversion prevents ingress ponding at the hospital curb cut, but transfers flood risk to adjacent perimeter cells without reducing domain-wide flood storage.
-          </div>
+      {evaluationError && (
+        <div className="bg-red-950/50 border border-red-700 rounded px-3.5 py-2 text-xs font-mono text-red-200">
+          Solver Error: {evaluationError}
         </div>
       )}
 
-      {/* Centerpiece Geospatial Canvas for Interventions */}
-      {evaluationResult && selectedPlanMetrics && selectedDiff && (
-        <div className="bg-onyx-900 rounded-lg border border-onyx-800 overflow-hidden shadow-tactical flex flex-col font-mono text-xs">
-          {/* Canvas Top Bar */}
-          <div className="bg-onyx-950 px-4 py-2 border-b border-onyx-800 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-storm-300">
-              <Compass className="w-4 h-4 text-safety-orange" />
-              <span className="font-bold text-storm-100 text-xs tracking-wide">
-                SPATIAL INTERVENTION OUTCOME // {selectedPlanDef.name.toUpperCase()}
-              </span>
-              <span className="text-onyx-700 hidden sm:inline">|</span>
-              <span className="text-[10px] text-storm-400 hidden sm:inline">{activeOption?.shortLabel || activeProfile.name}</span>
+      {/* Main Map-First Comparison Grid (8 / 12 Dominant Side-by-Side Map + 4 / 12 Contextual Evidence Rail) */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 flex-1 min-h-0">
+        {/* Dominant Side-by-Side / Curtain Comparison Viewport */}
+        <div className="xl:col-span-8 flex flex-col gap-2 bg-onyx-900 border border-onyx-800 rounded p-2.5 min-h-[540px]">
+          <CanvasLayerDock
+            activeLayers={canvasLayers}
+            onToggleLayer={toggleCanvasLayer}
+            compact
+          />
 
-              {/* View Mode: Delta vs Absolute */}
-              <div className="flex items-center gap-1 bg-onyx-900 rounded border border-onyx-800 p-0.5 ml-2">
-                <button
-                  onClick={() => setMapViewMode('delta')}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                    mapViewMode === 'delta'
-                      ? 'bg-emerald-600 text-white shadow-tactical'
-                      : 'text-storm-400 hover:text-storm-200'
-                  }`}
-                  title="Shows avoided flood volume (green) vs unmitigated baseline"
-                >
-                  AVOIDED WATER (DELTA)
-                </button>
-                <button
-                  onClick={() => setMapViewMode('standard')}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                    mapViewMode === 'standard'
-                      ? 'bg-safety-orange text-white shadow-tactical'
-                      : 'text-storm-400 hover:text-storm-200'
-                  }`}
-                  title="Shows absolute simulated flood depth bands"
-                >
-                  ACTUAL DEPTH BANDS
-                </button>
+          {isComputingEvaluation || !evaluationResult || !selectedPlanMetrics ? (
+            <div className="flex-1 min-h-[430px] bg-onyx-950 rounded border border-onyx-800 flex items-center justify-center">
+              <div className="flex items-center gap-2.5 text-xs font-mono text-cyan-300">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Executing identical-storm 2D solver for Baseline, Alpha, Beta, and Gamma...</span>
               </div>
             </div>
-
-            {/* Quick Layer Toggles */}
-            <div className="flex flex-wrap items-center gap-1">
-              <button
-                onClick={() => toggleCanvasLayer('satellite')}
-                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                  canvasLayers.satellite ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
-                }`}
-              >
-                SATELLITE
-              </button>
-              <button
-                onClick={() => toggleCanvasLayer('water')}
-                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                  canvasLayers.water ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
-                }`}
-              >
-                WATER
-              </button>
-              <button
-                onClick={() => toggleCanvasLayer('roads')}
-                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                  canvasLayers.roads ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
-                }`}
-              >
-                ROADS
-              </button>
-              <button
-                onClick={() => toggleCanvasLayer('facilities')}
-                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                  canvasLayers.facilities ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
-                }`}
-              >
-                HOSPITALS
-              </button>
-              <button
-                onClick={() => toggleCanvasLayer('drainage')}
-                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                  canvasLayers.drainage ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
-                }`}
-              >
-                CULVERTS
-              </button>
-              <button
-                onClick={() => toggleCanvasLayer('legend')}
-                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                  canvasLayers.legend !== false ? 'bg-onyx-800 text-storm-100 border border-onyx-700 font-bold' : 'text-storm-500 hover:text-storm-300'
-                }`}
-              >
-                LEGEND
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive Geographic Canvas Frame */}
-          <div className="relative bg-onyx-950 h-[480px] overflow-hidden">
-            <GeographicSimulationCanvas
+          ) : (
+            <SplitComparisonCanvas
               dataset={dataset}
-              waterDepth={selectedPlanMetrics.waterDepth}
               baselineWaterDepth={evaluationResult.baseline.waterDepth}
-              viewMode={mapViewMode}
+              planWaterDepth={selectedPlanMetrics.waterDepth}
+              planShortLabel={planShortLabel}
+              baselineLabel={
+                activeDisruptionIds.length > 0
+                  ? 'Baseline (Impaired Drainage)'
+                  : 'Baseline (Nominal Drainage)'
+              }
               activeLayers={canvasLayers}
+              comparisonMode={comparisonMode}
+              onChangeComparisonMode={setComparisonMode}
+              selectedCell={selectedCell}
               selectedRoadId={selectedRoadId}
               selectedFacilityId={selectedFacilityId}
-              onCellHover={setInspectedCell}
-              onCellClick={(info) => {
-                setInspectedCell(info);
-                if (info.facility) setSelectedFacilityId(info.facility.facilityId);
-                if (info.roadCorridor) setSelectedRoadId(info.roadCorridor.road.roadId);
-              }}
-              onSelectRoad={(road) => {
-                setSelectedRoadId(road ? road.roadId : null);
-                if (road) setSelectedFacilityId(null);
-              }}
-              onSelectFacility={(fac) => {
-                setSelectedFacilityId(fac ? fac.facilityId : null);
-                if (fac) setSelectedRoadId(null);
-              }}
-              className="w-full h-full"
+              stagedWorkOrders={workOrders}
+              activePlanId={selectedPlanId}
+              onSelectCell={setSelectedCell}
+              onSelectRoad={(road) => setSelectedRoadId(road ? road.roadId : null)}
+              onSelectFacility={(fac) => setSelectedFacilityId(fac ? fac.facilityId : null)}
             />
-          </div>
+          )}
+        </div>
 
-          {/* Bottom Telemetry Bar */}
-          <div className="bg-onyx-950 px-4 py-2.5 border-t border-onyx-800 flex flex-wrap items-center justify-between gap-3 text-[11px]">
-            <div className="flex flex-wrap items-center gap-4 text-storm-300">
-              <div>
-                <span className="text-storm-500">Plan:</span>{' '}
-                <strong className="text-storm-100">{selectedPlanDef.name}</strong>
-              </div>
-              <div className="h-3 w-[1px] bg-onyx-800 hidden sm:block" />
-              <div>
-                <span className="text-storm-500">Surface Water Avoided:</span>{' '}
-                <strong className={selectedDiff.avoidedSurfaceVolumeM3 > 0 ? 'text-emerald-400' : 'text-storm-300'}>
-                  {selectedDiff.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}
-                  {selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³
-                </strong>
-              </div>
-              <div className="h-3 w-[1px] bg-onyx-800 hidden sm:block" />
-              <div>
-                <span className="text-storm-500">Roads Protected:</span>{' '}
-                <strong className="text-emerald-400">{selectedDiff.protectedRoadCount} Segments</strong>
-              </div>
-              <div className="h-3 w-[1px] bg-onyx-800 hidden sm:block" />
-              <div>
-                <span className="text-storm-500">Classification:</span>{' '}
+        {/* Right Contextual Differential & Temporal Threshold Rail */}
+        <div className="xl:col-span-4 flex flex-col gap-3 overflow-y-auto pr-0.5">
+          {/* 1. Selected Plan Differential Telemetry */}
+          {selectedDiff && (
+            <div className="bg-onyx-900 border border-onyx-800 rounded p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+                  <Droplets className="w-3.5 h-3.5 text-cyan-400" />
+                  {planShortLabel} Differentials
+                </span>
                 {renderClassificationBadge(selectedDiff.classification)}
               </div>
-            </div>
 
-            {inspectedCell && (
-              <div className="flex items-center gap-2 text-storm-300 bg-onyx-900 px-2 py-1 rounded border border-onyx-800 text-[10px]">
-                <MapPin className="w-3 h-3 text-safety-orange" />
-                <span>
-                  Reticle: [{inspectedCell.row}, {inspectedCell.col}] • Depth: {(inspectedCell.waterDepthM * 100).toFixed(1)} cm
-                  {inspectedCell.deltaWaterDepthM !== undefined && (
-                    <span
-                      className={`ml-1.5 font-bold ${
-                        inspectedCell.deltaWaterDepthM > 0
-                          ? 'text-emerald-400'
-                          : inspectedCell.deltaWaterDepthM < 0
-                          ? 'text-amber-400'
-                          : 'text-storm-400'
-                      }`}
-                    >
-                      (Δ:{' '}
-                      {inspectedCell.deltaWaterDepthM > 0
-                        ? `-${(inspectedCell.deltaWaterDepthM * 100).toFixed(1)}cm drawdown`
-                        : inspectedCell.deltaWaterDepthM < 0
-                        ? `+${(Math.abs(inspectedCell.deltaWaterDepthM) * 100).toFixed(1)}cm increase`
-                        : '0.0cm'}
-                      )
-                    </span>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
+                  <span className="text-[9px] text-storm-400 uppercase block">Avoided Storage</span>
+                  <span className="text-sm font-bold text-emerald-400">
+                    {selectedDiff.avoidedSurfaceVolumeM3 >= 0 ? '+' : ''}
+                    {selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³
+                  </span>
+                </div>
+                <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
+                  <span className="text-[9px] text-storm-400 uppercase block">Peak Depth Δ</span>
+                  <span className="text-sm font-bold text-white">
+                    {selectedDiff.peakDepthReductionM >= 0 ? '-' : '+'}
+                    {(Math.abs(selectedDiff.peakDepthReductionM) * 100).toFixed(1)} cm
+                  </span>
+                </div>
+                <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
+                  <span className="text-[9px] text-storm-400 uppercase block">Intervention Sink</span>
+                  <span className="text-sm font-bold text-cyan-300">
+                    {selectedDiff.inletDrainageAccounting.interventionSinkExtractionM3.toLocaleString()} m³
+                  </span>
+                </div>
+                <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
+                  <span className="text-[9px] text-storm-400 uppercase block">Net Road Screening Δ</span>
+                  <span className="text-sm font-bold text-storm-100">
+                    {selectedDiff.roadTransitions.netProtectedRoadCount >= 0 ? '+' : ''}
+                    {selectedDiff.roadTransitions.netProtectedRoadCount} corridors
+                  </span>
+                </div>
+              </div>
+
+              {/* Drainage Attribution Breakdown */}
+              <div className="text-[10px] font-mono text-storm-400 bg-onyx-950 border border-onyx-800 rounded px-2.5 py-1.5 space-y-0.5">
+                <div>
+                  Background Inlets: <span className="text-storm-200">{selectedDiff.inletDrainageAccounting.backgroundInletDrainageM3.toLocaleString()} m³</span>
+                </div>
+                <div>
+                  Incremental Drainage vs Baseline:{' '}
+                  <span className="text-cyan-300">
+                    {selectedDiff.inletDrainageAccounting.incrementalDrainageM3 >= 0 ? '+' : ''}
+                    {selectedDiff.inletDrainageAccounting.incrementalDrainageM3.toLocaleString()} m³
+                  </span>
+                </div>
+              </div>
+
+              {/* Explicit Improved & Worsened Road Transitions */}
+              {(selectedDiff.roadTransitions.improvedRoadNames.length > 0 ||
+                selectedDiff.roadTransitions.worsenedRoadNames.length > 0) && (
+                <div className="space-y-1 text-[10px] font-mono">
+                  {selectedDiff.roadTransitions.improvedRoadNames.length > 0 && (
+                    <div className="text-emerald-300 bg-emerald-950/30 border border-emerald-800/50 rounded px-2 py-1">
+                      Below 30cm screening tier: {selectedDiff.roadTransitions.improvedRoadNames.join(', ')}
+                    </div>
                   )}
+                  {selectedDiff.roadTransitions.worsenedRoadNames.length > 0 && (
+                    <div className="text-red-300 bg-red-950/30 border border-red-800/50 rounded px-2 py-1">
+                      Worsened to ≥30cm: {selectedDiff.roadTransitions.worsenedRoadNames.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Prominent Adverse Local Ponding Disclosure */}
+              {selectedDiff.spatialDeflection.adverseCellCount > 0 && (
+                <div className="bg-amber-950/40 border border-amber-600/70 rounded p-2.5 text-[11px] text-amber-200 space-y-1">
+                  <div className="flex items-center gap-1.5 font-mono font-bold text-amber-300 text-[10px] uppercase">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Adverse Local Ponding Trade-Off
+                  </div>
+                  <p className="leading-snug">
+                    Produces <strong>+{(selectedDiff.spatialDeflection.maxAdverseDepthIncreaseM * 100).toFixed(1)} cm</strong> additional water on{' '}
+                    <strong>{selectedDiff.spatialDeflection.adverseCellCount} adjacent cells</strong> ({selectedDiff.spatialDeflection.adverseAreaM2.toLocaleString()} m², deflected volume{' '}
+                    {selectedDiff.spatialDeflection.deflectedVolumeM3.toLocaleString()} m³).
+                  </p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-storm-300 leading-relaxed">
+                {selectedDiff.classificationRationale}
+              </p>
+            </div>
+          )}
+
+          {/* 2. Discrete Time-to-Threshold Screening Analysis (Strictly Solver-Derived) */}
+          {selectedDiff?.temporalThresholds && (
+            <div className="bg-onyx-900 border border-onyx-800 rounded">
+              <button
+                type="button"
+                onClick={() => setShowTemporalSection((v) => !v)}
+                className="w-full px-3.5 py-2.5 flex items-center justify-between text-[11px] font-mono text-storm-200 hover:text-white"
+              >
+                <span className="flex items-center gap-1.5 font-bold uppercase tracking-wider">
+                  <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                  Screening Threshold Timing (Δt={selectedDiff.temporalThresholds.dtMacroSeconds}s)
                 </span>
-                <button
-                  onClick={() => {
-                    setInspectedCell(null);
-                    setSelectedRoadId(null);
-                    setSelectedFacilityId(null);
-                  }}
-                  className="text-storm-500 hover:text-white"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                {showTemporalSection ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
 
-      {/* Detailed Plan Review Panel */}
-      {evaluationResult && selectedDiff && selectedPlanMetrics && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Physical Specifications & Target Infrastructure */}
-          <div className="lg:col-span-6 bg-onyx-900 rounded border border-onyx-800 p-5 font-mono text-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-onyx-800 text-storm-400">
-              <span className="font-bold text-storm-200 uppercase flex items-center gap-2">
-                <Layers className="w-4 h-4 text-safety-orange" />
-                <span>PHYSICAL SPECIFICATION // {selectedPlanDef.id.toUpperCase()}</span>
-              </span>
-              <span className="px-2 py-0.5 rounded bg-onyx-800 text-storm-300 font-bold text-[10px]">
-                {selectedPlanDef.type}
-              </span>
-            </div>
-
-            <div>
-              <h4 className="font-display font-bold text-base text-storm-100">{selectedPlanDef.name}</h4>
-              <p className="text-xs text-storm-300 font-sans mt-1">{selectedPlanDef.description}</p>
-            </div>
-
-            <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2 text-[11px]">
-              <div className="flex justify-between text-storm-400">
-                <span>TARGET INFRASTRUCTURE:</span>
-                <span className="text-storm-200 font-bold">{selectedPlanDef.targetInfrastructure}</span>
-              </div>
-              <div className="flex justify-between text-storm-400">
-                <span>RESOURCE BURDEN:</span>
-                <span className="text-storm-300">{selectedPlanDef.resourceCost}</span>
-              </div>
-              {selectedPlanDef.physicalParameters.barrierCells && (
-                <div className="flex justify-between text-storm-400">
-                  <span>BARRIER CREST:</span>
-                  <span className="text-storm-200 font-bold">
-                    +{selectedPlanDef.physicalParameters.elevationDeltaM}m on {selectedPlanDef.physicalParameters.barrierCells.length} cells
-                  </span>
-                </div>
-              )}
-              {selectedPlanDef.physicalParameters.pumpCapacityM3PerSec && (
-                <div className="flex justify-between text-storm-400">
-                  <span>EXTRACTION RATE:</span>
-                  <span className="text-safety-orange font-bold">
-                    {selectedPlanDef.physicalParameters.pumpCapacityM3PerSec.toFixed(1)} m³/s (Mass-Conserving Suction Sink)
-                  </span>
-                </div>
-              )}
-              {selectedPlanDef.physicalParameters.restoredCapacityM3PerSec && (
-                <div className="flex justify-between text-storm-400">
-                  <span>RESTORED CAPACITY:</span>
-                  <span className="text-emerald-400 font-bold">
-                    {selectedPlanDef.physicalParameters.restoredCapacityM3PerSec.toFixed(1)} m³/s (Nominal Design)
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Plan Gamma Solver Limitation Disclosure */}
-            {selectedPlanId === 'plan-gamma' && (
-              <div className="bg-blue-950/40 border border-blue-800/60 p-3 rounded text-[11px] font-sans space-y-1 text-storm-300">
-                <div className="font-bold text-blue-300 flex items-center gap-1.5 font-mono text-[10px] uppercase">
-                  <Info className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                  <span>Brookline Culvert Representation Disclosure</span>
-                </div>
-                <p className="text-[10.5px] leading-relaxed">
-                  The Brookline culvert is represented as an unrouted point drainage sink on the elevated road deck (7.51m NAVD88) with nominal 12.5 m³/s capacity; water is removed from domain storage rather than hydraulically conveyed through a coupled conduit into downstream water bodies.
-                </p>
-              </div>
-            )}
-
-            {/* Hospital Access Impact Table */}
-            <div className="space-y-2 pt-2">
-              <span className="font-bold text-storm-300 uppercase text-[11px] block">
-                HOSPITAL PERIMETER TRANSITIONS ({selectedPlanMetrics.hospitals.length} FACILITIES)
-              </span>
-              <div className="bg-onyx-950 rounded border border-onyx-800 divide-y divide-onyx-900 text-[11px]">
-                {selectedDiff.hospitalImprovements.map((imp: HospitalImprovement) => (
-                  <div key={imp.hospitalName} className="p-2.5 flex items-center justify-between">
-                    <span className="text-storm-200">{imp.hospitalName}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-storm-500">{imp.baselineStatus.replace(/_/g, ' ')}</span>
-                      <ArrowRight className="w-3 h-3 text-storm-600" />
-                      <span className={`font-bold ${
-                        imp.planStatus === 'ACCESSIBLE' 
-                          ? 'text-emerald-400' 
-                          : imp.planStatus === 'CAUTION_PERIMETER_PONDING' 
-                          ? 'text-amber-400' 
-                          : 'text-red-400'
-                      }`}>
-                        {imp.planStatus.replace(/_/g, ' ')}
+              {showTemporalSection && (
+                <div className="px-3.5 pb-3 pt-1 border-t border-onyx-800 space-y-2 text-[11px]">
+                  <div className="grid grid-cols-3 gap-1.5 font-mono text-[10px]">
+                    <div className="bg-onyx-950 border border-onyx-800 rounded p-1.5 text-center">
+                      <span className="text-storm-400 block">Avoided ≥30cm</span>
+                      <span className="text-emerald-400 font-bold text-xs">
+                        {selectedDiff.temporalThresholds.avoided30cmRoadCount}
+                      </span>
+                    </div>
+                    <div className="bg-onyx-950 border border-onyx-800 rounded p-1.5 text-center">
+                      <span className="text-storm-400 block">Delayed ≥30cm</span>
+                      <span className="text-cyan-300 font-bold text-xs">
+                        {selectedDiff.temporalThresholds.delayed30cmRoadCount}
+                      </span>
+                    </div>
+                    <div className="bg-onyx-950 border border-onyx-800 rounded p-1.5 text-center">
+                      <span className="text-storm-400 block">Earlier/New</span>
+                      <span className="text-amber-300 font-bold text-xs">
+                        {selectedDiff.temporalThresholds.acceleratedOrNewlyCrossed30cmRoadCount}
                       </span>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
 
-          {/* Right: Comparative Solver Delta & Decision Action */}
-          <div className="lg:col-span-6 bg-onyx-900 rounded border border-onyx-800 p-5 font-mono text-xs flex flex-col justify-between space-y-4">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-onyx-800 text-storm-400">
-                <span className="font-bold text-storm-200 uppercase flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-safety-orange" />
-                  <span>CALCULATED DIFFERENTIALS // VS. BASELINE</span>
-                </span>
-                <span className="text-emerald-400 font-bold text-[10px]">
-                  SOLVER PASS
-                </span>
-              </div>
-
-              {/* Differentials Callouts */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-onyx-950 p-3 rounded border border-onyx-800">
-                  <span className="text-[10px] text-storm-500 uppercase block font-bold">AVOIDED SURFACE WATER</span>
-                  <div className="text-lg font-bold text-safety-orange flex items-center gap-1 mt-1">
-                    <TrendingDown className="w-4 h-4" />
-                    <span>{selectedDiff.avoidedSurfaceVolumeM3 > 0 ? '+' : ''}{selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³</span>
-                  </div>
-                  <div className="text-[10px] text-storm-500 mt-1">
-                    Surface storage reduction vs. unmitigated baseline
-                  </div>
-                </div>
-
-                <div className="bg-onyx-950 p-3 rounded border border-onyx-800">
-                  <span className="text-[10px] text-storm-500 uppercase block font-bold">PEAK DEPTH REDUCTION</span>
-                  <div className="text-lg font-bold text-storm-100 mt-1">
-                    {selectedDiff.peakDepthReductionM > 0 ? '-' : ''}
-                    {(selectedDiff.peakDepthReductionM * 100).toFixed(1)} cm
-                  </div>
-                  <div className="text-[10px] text-storm-500 mt-1">
-                    Maximum single-cell depth delta across 4096 cells
-                  </div>
-                </div>
-              </div>
-
-              {/* Inlet Drainage Accounting Card */}
-              <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2 text-[11px]">
-                <div className="text-storm-300 font-bold text-[11px] uppercase border-b border-onyx-800/80 pb-1 flex justify-between items-center">
-                  <span>INLET & DRAINAGE ATTRIBUTION ACCOUNTING</span>
-                  <span className="text-[10px] text-storm-500 font-normal">Mass Conservation Verified</span>
-                </div>
-                <div className="space-y-1 text-storm-400">
-                  <div className="flex justify-between">
-                    <span>Total Catchment Drainage:</span>
-                    <strong className="text-storm-200">{selectedDiff.inletDrainageAccounting.totalCatchmentDrainageM3.toLocaleString()} m³</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Background Stormwater Inlets (Fenway + Longwood):</span>
-                    <span className="text-storm-300">{selectedDiff.inletDrainageAccounting.backgroundInletDrainageM3.toLocaleString()} m³</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Intervention Sink Extraction:</span>
-                    <span className="text-blue-400 font-bold">{selectedDiff.inletDrainageAccounting.interventionSinkExtractionM3.toLocaleString()} m³</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Incremental Drainage vs Baseline:</span>
-                    <span className="text-emerald-400 font-bold">+{selectedDiff.inletDrainageAccounting.incrementalDrainageM3.toLocaleString()} m³</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Avoided Surface Storage:</span>
-                    <span className="text-safety-orange font-bold">+{selectedDiff.inletDrainageAccounting.avoidedSurfaceStorageM3.toLocaleString()} m³</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Protected and Worsened Roads Callout */}
-              <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-1.5">
-                <div className="flex items-center justify-between text-storm-400 text-[11px]">
-                  <span>SCREENED ROAD CORRIDOR TRANSITIONS:</span>
-                  <span className="text-emerald-400 font-bold">{selectedDiff.protectedRoadCount} Restored</span>
-                </div>
-                {selectedDiff.roadTransitions.improvedRoadNames.length > 0 ? (
-                  <div className="text-[11px] text-emerald-400 font-mono">
-                    Restored Passable (&lt; 0.30m): {selectedDiff.roadTransitions.improvedRoadNames.join(', ')}
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-storm-500 font-mono">
-                    0 road corridors restored below 0.30m threshold under this configuration.
-                  </div>
-                )}
-                {selectedDiff.roadTransitions.worsenedRoadNames.length > 0 ? (
-                  <div className="text-[11px] text-amber-400 font-mono pt-1">
-                    ⚠️ Worsened to Impassable (≥ 0.30m): {selectedDiff.roadTransitions.worsenedRoadNames.join(', ')}
-                  </div>
-                ) : (
-                  <div className="text-[10px] text-storm-600 font-mono">
-                    0 road corridors worsened by diverted flow.
-                  </div>
-                )}
-              </div>
-
-              {/* Model Ranking & Recommendation Summary */}
-              <div className="bg-purple-950/40 border border-purple-800/60 p-3.5 rounded space-y-2">
-                <div className="flex items-center gap-1.5 text-purple-300 font-bold text-[11px]">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>SCREENING RECOMMENDATION // {activeOption?.shortLabel || activeProfile.name}</span>
-                </div>
-                <div className="text-storm-100 font-bold text-xs">
-                  {evaluationResult.ranking.recommendedPlanId ? (
-                    selectedPlanId === evaluationResult.ranking.recommendedPlanId
-                      ? `RECOMMENDED PLAN: ${selectedPlanDef.name}`
-                      : `ALTERNATIVE: ${selectedPlanDef.name} (Recommended: ${evaluationResult.ranking.recommendedPlanId.toUpperCase()})`
-                  ) : (
-                    'INCONCLUSIVE: NO PLAN DECISIVELY RECOMMENDED'
-                  )}
-                </div>
-                <p className="text-storm-300 font-sans text-xs leading-relaxed">
-                  {evaluationResult.ranking.recommendationRationale}
-                </p>
-                <div className="text-[10.5px] text-purple-300/80 font-mono pt-1 border-t border-purple-900/60">
-                  * DELTA screening threshold (≥50 m³ avoided volume or road restoration), not an empirically established boundary. Precedence: ADVERSE_DEFLECTION &gt; CAPACITY_CONSTRAINED &gt; MEASURABLE_BENEFIT.
-                </div>
-              </div>
-
-              {/* Deterministic Evaluation Key Findings */}
-              {evaluationResult.comparison && (
-                <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2 text-[11px]">
-                  <div className="text-storm-300 font-bold text-[11px] uppercase border-b border-onyx-800/80 pb-1">
-                    DETERMINISTIC FINDINGS & CAPACITY LIMITS
-                  </div>
-                  <div className="space-y-1.5 text-storm-400 font-sans">
-                    {evaluationResult.comparison.keyFindings.map((finding, idx) => (
-                      <div key={idx} className="text-[11px] text-storm-300">
-                        • {finding}
-                      </div>
-                    ))}
-                    {evaluationResult.comparison.capacityLimitations.map((cap, idx) => (
-                      <div key={idx} className="text-[11px] text-amber-300">
-                        ⚠️ <strong>Capacity Limit:</strong> {cap}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Action Section: Human Approval & Decision Record Persistence */}
-            <div className="pt-4 border-t border-onyx-800 space-y-3">
-              {approvedRecord ? (
-                <div className="p-4 rounded-lg bg-emerald-950/80 border border-emerald-700 font-mono text-xs space-y-3 shadow-tactical">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-emerald-300 font-bold">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                      <span>DECISION RECORD COMMITTED &amp; APPROVED // {approvedRecord.decisionId}</span>
+                  {selectedDiff.temporalThresholds.road30cmComparisons.length > 0 ? (
+                    <div className="max-h-40 overflow-y-auto space-y-1 font-mono text-[10px]">
+                      {selectedDiff.temporalThresholds.road30cmComparisons.slice(0, 8).map((c) => (
+                        <div
+                          key={c.assetId}
+                          className="flex items-center justify-between gap-2 bg-onyx-950 border border-onyx-850 rounded px-2 py-1"
+                        >
+                          <span className="text-storm-200 truncate">{c.assetName}</span>
+                          <span className="flex-shrink-0 text-right">
+                            <span className="text-storm-400">
+                              {formatSecondsCompact(c.baselineCrossingSeconds)} → {formatSecondsCompact(c.planCrossingSeconds)}
+                            </span>{' '}
+                            <span
+                              className={`font-bold ${
+                                c.outcome === 'AVOIDED'
+                                  ? 'text-emerald-400'
+                                  : c.outcome === 'DELAYED'
+                                  ? 'text-cyan-300'
+                                  : c.outcome === 'ACCELERATED' || c.outcome === 'NEWLY_CROSSED'
+                                  ? 'text-amber-300'
+                                  : 'text-storm-400'
+                              }`}
+                            >
+                              [{c.outcome === 'DELAYED' && c.deltaSeconds ? `+${formatSecondsCompact(c.deltaSeconds)}` : c.outcome}]
+                            </span>
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-emerald-900/80 text-emerald-200 border border-emerald-600 text-[10px]">
-                      FORGE KVS PERSISTED
-                    </span>
-                  </div>
+                  ) : (
+                    <div className="text-[10px] font-mono text-storm-400 bg-onyx-950 border border-onyx-850 rounded px-2.5 py-2">
+                      No critical road segments crossed the 30 cm screening tier during this simulated horizon.
+                    </div>
+                  )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-storm-300 border-y border-emerald-800/60 py-2">
-                    <div><span className="text-storm-400">Authorized Plan:</span> <strong className="text-emerald-300">{approvedRecord.chosenPlan?.name}</strong></div>
-                    <div><span className="text-storm-400">Stress Profile:</span> <strong className="text-storm-100">{activeProfile.name}</strong></div>
-                    <div><span className="text-storm-400">Approver:</span> <strong className="text-storm-100">{approvedRecord.humanApprover?.displayName} [{approvedRecord.humanApprover?.role}]</strong></div>
-                    <div><span className="text-storm-400">Scenario Hash:</span> <code className="text-emerald-400 font-mono text-[10px]">{approvedRecord.scenarioHash}</code></div>
-                  </div>
-
-                  <div className="text-xs text-storm-200">
-                    <span className="font-bold text-storm-400">Rationale: </span>
-                    <em>"{approvedRecord.engineeringRationale}"</em>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
-                    {onNavigateToDecisions && (
-                      <button
-                        onClick={onNavigateToDecisions}
-                        className="px-4 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-bold flex items-center gap-1.5 transition-colors"
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span>VIEW IN DECISION RECORDS &rarr;</span>
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setApprovedRecord(null)}
-                      className="px-3 py-2 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-300 border border-onyx-700 text-xs transition-colors"
-                    >
-                      Authorize Another Scenario
-                    </button>
-                  </div>
+                  <p className="text-[10px] text-storm-400 leading-snug">
+                    {selectedDiff.temporalThresholds.disclosure}
+                  </p>
                 </div>
-              ) : (
-                <>
-                  <button
-                    onClick={() => {
-                      setApprovalError(null);
-                      setIsApprovalModalOpen(true);
-                    }}
-                    className={`w-full flex items-center justify-center gap-2 font-mono text-xs font-bold py-3.5 px-4 rounded-lg transition-all shadow-tactical ${
-                      selectedPlanId === 'plan-gamma'
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400'
-                        : 'bg-safety-orange hover:bg-safety-hover text-white'
-                    }`}
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>INITIATE INCIDENT COMMANDER APPROVAL REVIEW: {selectedPlanDef.id.toUpperCase()} &rarr;</span>
-                  </button>
-                  <div className="text-[11px] text-storm-400 text-center font-mono">
-                    Requires explicit human engineering rationale and 2-step confirmation before writing to Forge KVS audit ledger.
-                  </div>
-                </>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Explicit Human Approval Confirmation Modal */}
-      {isApprovalModalOpen && evaluationResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-onyx-900 border border-onyx-700 rounded-lg max-w-2xl w-full p-6 shadow-2xl font-mono text-xs space-y-5 my-8">
-            {/* Header */}
-            <div className="flex items-start justify-between border-b border-onyx-800 pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-safety-orange" />
-                <div>
-                  <div className="font-bold text-sm text-storm-100 uppercase tracking-wider">
-                    HUMAN APPROVAL // INCIDENT COMMANDER AUTHORIZATION
-                  </div>
-                  <div className="text-[11px] text-storm-400">
-                    Phase 5 Application-Level Audit Ledger Enforcement
-                  </div>
+          {/* 3. Collapsible Full 3-Plan Evidence & Model Limitations Drawer */}
+          <div className="bg-onyx-900 border border-onyx-800 rounded">
+            <button
+              type="button"
+              onClick={() => setShowFullComparisonDrawer((v) => !v)}
+              className="w-full px-3.5 py-2.5 flex items-center justify-between text-[11px] font-mono text-storm-300 hover:text-white"
+            >
+              <span className="font-bold uppercase tracking-wider">
+                Comparative Evidence &amp; Limitations
+              </span>
+              {showFullComparisonDrawer ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            {showFullComparisonDrawer && evaluationResult && (
+              <div className="px-3.5 pb-3 pt-1 border-t border-onyx-800 space-y-2 text-[11px] text-storm-300">
+                <div className="text-[10px] font-mono text-amber-300">
+                  Screening Threshold Disclosure: DELTA uses a ≥50 m³ avoided-storage screening threshold (not an empirical statutory standard).
                 </div>
-              </div>
-              <button
-                onClick={() => setIsApprovalModalOpen(false)}
-                className="text-storm-400 hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Error Banner */}
-            {approvalError && (
-              <div className="p-3 rounded bg-red-950/80 border border-red-800 text-red-300 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <div className="font-bold">APPROVAL SUBMISSION REJECTED:</div>
-                  <div className="text-[11px]">{approvalError}</div>
+                <div className="space-y-1">
+                  {evaluationResult.comparison.keyFindings.map((f, idx) => (
+                    <div key={idx} className="text-[11px] text-storm-300">
+                      • {f}
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[10px] text-storm-400 pt-1 border-t border-onyx-800">
+                  Culvert CULVERT-01-BROOKLINE is modelled as a road-deck point sink on cell [17, 26] (12.5 m³/s screening heuristic).
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>
 
-            {/* Evaluation Summary Strip */}
-            <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2">
-              <div className="text-storm-400 font-bold text-[11px]">EVALUATED PHYSICAL CANDIDATE:</div>
-              <div className="text-storm-100 font-bold text-sm">{selectedPlanDef.name}</div>
-              <div className="text-storm-300 text-[11px]">Profile: <strong>{activeProfile.name}</strong> ({activeProfile.totalRainfallMm} mm)</div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 text-[11px]">
+      {/* Human Commander Decision Authorization Modal */}
+      {isApprovalModalOpen && evaluationResult && selectedDiff && (
+        <div className="fixed inset-0 z-50 bg-onyx-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-onyx-900 border border-onyx-700 rounded-lg max-w-xl w-full p-5 space-y-4 font-mono text-xs shadow-2xl">
+            <div className="flex items-center justify-between border-b border-onyx-800 pb-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <ShieldCheck className="w-5 h-5 text-safety-orange" />
+                <span>Authorize Immutable Decision Record</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsApprovalModalOpen(false)}
+                className="text-storm-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {approvalError && (
+              <div className="bg-red-950/60 border border-red-700 rounded p-2.5 text-red-200 text-[11px]">
+                {approvalError}
+              </div>
+            )}
+
+            <div className="bg-onyx-950 border border-onyx-800 rounded p-3 space-y-1.5 text-[11px]">
+              <div className="text-white font-bold">{selectedPlanDef.name}</div>
+              <div className="text-storm-300">Profile: {activeProfile.name}</div>
+              <div className="text-storm-400">
+                Disruptions: {evaluationResult.simulationMetadata.disruptionId} · Hash:{' '}
+                <span className="text-cyan-300">{activeScenarioHash}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pt-1.5">
                 <div>
-                  <span className="text-storm-400 block">Avoided Volume:</span>
+                  <span className="text-storm-500 block">Avoided Volume</span>
                   <span className="text-emerald-400 font-bold">
-                    {(selectedDiff?.avoidedSurfaceVolumeM3 ?? 0) > 0 ? '+' : ''}
-                    {selectedDiff?.avoidedSurfaceVolumeM3?.toLocaleString()} m³
+                    +{selectedDiff.avoidedSurfaceVolumeM3.toLocaleString()} m³
                   </span>
                 </div>
                 <div>
-                  <span className="text-storm-400 block">Peak Depth Delta:</span>
-                  <span className="text-emerald-400 font-bold">-{selectedDiff?.peakDepthReductionM.toFixed(3)} m</span>
+                  <span className="text-storm-500 block">Peak Depth Δ</span>
+                  <span className="text-white font-bold">
+                    -{(selectedDiff.peakDepthReductionM * 100).toFixed(1)} cm
+                  </span>
                 </div>
                 <div>
-                  <span className="text-storm-400 block">Restored Routes:</span>
-                  <span className="text-storm-200 font-bold">{selectedDiff?.protectedRoadCount ?? 0} corridors</span>
+                  <span className="text-storm-500 block">Adverse Cells</span>
+                  <span className="text-amber-300 font-bold">
+                    {selectedDiff.spatialDeflection.adverseCellCount}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Scenario Hash & Authenticated Identity Strip */}
-            <div className="bg-onyx-950/60 p-3 rounded border border-onyx-800 space-y-2 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="text-storm-400">CANONICAL SCENARIO HASH:</span>
-                <code className="text-purple-300 font-mono text-[10px] bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/40">
-                  sha256:f0a73115e28a69b7f0dcfbbfe52182597bf8862c482d302b9c50154f488c9a47
-                </code>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-storm-400">AUTHENTICATED IDENTITY:</span>
-                <span className="text-storm-200 font-bold">Incident Commander [Verified Atlassian Session]</span>
-              </div>
-              <div className="text-[10px] text-amber-400/90 pt-1 border-t border-onyx-800/80">
-                * The server-side Forge resolver verifies caller credentials and binds your authentic Atlassian Jira account ID. Client identity overrides are forbidden.
-              </div>
-            </div>
-
-            {/* Required Engineering Rationale Textarea */}
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <label className="block text-storm-300 font-bold text-[11px]">
-                ENGINEERING RATIONALE &amp; PHYSICAL JUSTIFICATION <span className="text-red-400">*</span>:
+                Engineering Rationale &amp; Justification <span className="text-red-400">*</span>
               </label>
               <textarea
                 value={engineeringRationale}
                 onChange={(e) => setEngineeringRationale(e.target.value)}
-                placeholder="State the engineering justification and hydrodynamic rationale for authorizing this plan..."
-                rows={3}
-                className="w-full bg-onyx-950 border border-onyx-700 rounded p-2.5 text-storm-100 text-xs font-sans focus:outline-none focus:border-safety-orange leading-relaxed"
+                rows={4}
+                className="w-full bg-onyx-950 border border-onyx-700 rounded p-2.5 text-storm-100 text-xs font-sans focus:outline-none focus:border-safety-orange"
               />
-              <div className="flex justify-between text-[10px] text-storm-500 font-mono">
-                <span>Required for Incident Commander compliance ledger.</span>
-                <span>{engineeringRationale.trim().length} characters</span>
-              </div>
             </div>
 
-            {/* Storage Architecture Notice */}
-            <div className="p-2.5 rounded bg-onyx-950 text-storm-400 text-[10px] font-mono border border-onyx-800/80 space-y-1">
-              <div><strong>AUDIT LEDGER GUARANTEES:</strong> Forge KVS append-only storage with server-enforced immutability check.</div>
-              <div><strong>LIMITATIONS:</strong> Concurrency is Last-Write-Wins (LWW) per key; not a multi-key atomic transaction or cryptographic hardware HSM.</div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-onyx-800">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-onyx-800">
               <button
                 type="button"
                 onClick={() => setIsApprovalModalOpen(false)}
                 disabled={isSubmitting}
-                className="px-4 py-2 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-300 font-bold transition-colors"
+                className="px-3.5 py-1.5 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-300 font-bold"
               >
-                CANCEL
+                Cancel
               </button>
-
               <button
                 type="button"
                 disabled={isSubmitting || engineeringRationale.trim().length < 5}
-                onClick={async () => {
-                  setIsSubmitting(true);
-                  setApprovalError(null);
-
-                  const payload = {
-                    chosenPlan: {
-                      planId: selectedPlanDef.id,
-                      name: selectedPlanDef.name,
-                      type: selectedPlanDef.type
-                    },
-                    scenarioHash: 'sha256:f0a73115e28a69b7f0dcfbbfe52182597bf8862c482d302b9c50154f488c9a47',
-                    canonicalScenario: {
-                      stormId: activeProfile.id,
-                      stormLabel: activeProfile.name,
-                      stormDepthMm: activeProfile.totalRainfallMm,
-                      cellResolutionM: 25.0,
-                      durationHours: activeProfile.durationHours,
-                      gridDimensions: '64x64',
-                      infiltrationRateMmPerHour: 2.0,
-                      manningN: 0.025,
-                      sector: 'Boston Longwood Medical Area & Muddy River Catchment (EPSG:26986)',
-                      provenance: activeProfile.provenance
-                    },
-                    baselineMetrics: {
-                      currentStorageM3: evaluationResult.baseline.currentStorageM3,
-                      maxWaterDepthM: evaluationResult.baseline.maxWaterDepthM,
-                      impassableRoadCount: evaluationResult.baseline.impassableRoadCount
-                    },
-                    interventionMetrics: {
-                      currentStorageM3: selectedPlanMetrics?.currentStorageM3,
-                      maxWaterDepthM: selectedPlanMetrics?.maxWaterDepthM,
-                      impassableRoadCount: selectedPlanMetrics?.impassableRoadCount
-                    },
-                    differentialMetrics: {
-                      avoidedSurfaceVolumeM3: selectedDiff?.avoidedSurfaceVolumeM3,
-                      peakDepthReductionM: selectedDiff?.peakDepthReductionM,
-                      protectedRoadCount: selectedDiff?.protectedRoadCount,
-                      protectedRoadNames: selectedDiff?.protectedRoadNames
-                    },
-                    engineeringRationale: engineeringRationale.trim(),
-                    schemaVersion: '2.0.0',
-                    humanApprover: {
-                      displayName: 'Incident Commander',
-                      role: 'Incident Commander'
-                    }
-                  };
-
-                  try {
-                    const res: any = await invokeSafe('recordDecision', payload);
-                    if (res && res.success) {
-                      setApprovedRecord(res.data || res.record || payload);
-                      setIsApprovalModalOpen(false);
-                    } else {
-                      setApprovalError(res?.error?.message || res?.message || 'Server rejected decision record approval.');
-                    }
-                  } catch (err: any) {
-                    setApprovalError(err?.message || String(err));
-                  } finally {
-                    setIsSubmitting(false);
-                  }
-                }}
-                className="px-5 py-2.5 rounded bg-safety-orange hover:bg-safety-hover disabled:opacity-50 text-white font-bold flex items-center gap-2 transition-colors shadow-tactical"
+                onClick={handleConfirmDecision}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded bg-safety-orange hover:bg-orange-600 disabled:opacity-50 text-white font-bold"
               >
-                <Lock className="w-4 h-4" />
-                <span>{isSubmitting ? 'COMMITTING TO FORGE KVS...' : 'CONFIRM & AUTHORIZE DECISION RECORD'}</span>
+                <Lock className="w-3.5 h-3.5" />
+                <span>{isSubmitting ? 'Recording...' : 'Confirm & Record Decision'}</span>
               </button>
             </div>
           </div>
