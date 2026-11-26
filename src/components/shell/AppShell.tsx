@@ -13,17 +13,19 @@ import {
   Menu, 
   X,
   User,
-  LayoutList
+  LayoutList,
+  FileText
 } from 'lucide-react';
 import { OverviewDistrictView } from './views/OverviewDistrictView';
 import { FloodSimulationView } from './views/FloodSimulationView';
 import { DisruptionsView } from './views/DisruptionsView';
 import { InterventionsView } from './views/InterventionsView';
+import { DecisionBriefingView } from './views/DecisionBriefingView';
 import { DecisionRecordsView } from './views/DecisionRecordsView';
 import { OperationalTicketsView } from './views/OperationalTicketsView';
 import { IssuePanel } from '../jira/IssuePanel';
 
-export type ShellTab = 'overview' | 'simulation' | 'disruptions' | 'interventions' | 'decisions' | 'tickets' | 'issue-panel';
+export type ShellTab = 'overview' | 'simulation' | 'disruptions' | 'interventions' | 'briefing' | 'decisions' | 'tickets' | 'issue-panel';
 
 interface AppShellProps {
   onExitToLanding: () => void;
@@ -40,9 +42,10 @@ export const AppShell: React.FC<AppShellProps> = ({ onExitToLanding }) => {
     { id: 'simulation', label: 'Flood Simulation', icon: PlayCircle, code: '02' },
     { id: 'disruptions', label: 'Scenario Disruptions', icon: AlertOctagon, code: '03' },
     { id: 'interventions', label: 'Intervention Planner', icon: BarChart3, code: '04' },
-    { id: 'decisions', label: 'Decision Records', icon: ShieldCheck, code: '05' },
-    { id: 'tickets', label: 'Operational Tickets', icon: Ticket, code: '06' },
-    { id: 'issue-panel', label: 'Jira Issue Panel', icon: LayoutList, code: '07' },
+    { id: 'briefing', label: 'Decision Briefing', icon: FileText, code: '05' },
+    { id: 'decisions', label: 'Decision Records', icon: ShieldCheck, code: '06' },
+    { id: 'tickets', label: 'Operational Tickets', icon: Ticket, code: '07' },
+    { id: 'issue-panel', label: 'Jira Issue Panel', icon: LayoutList, code: '08' },
   ];
 
   return (
@@ -91,7 +94,7 @@ export const AppShell: React.FC<AppShellProps> = ({ onExitToLanding }) => {
 
           <div className="hidden sm:flex items-center gap-2 font-mono text-xs text-storm-300 px-2.5 py-1 bg-onyx-950 rounded border border-onyx-800">
             <User className="w-3.5 h-3.5 text-storm-400" />
-            <span className="text-storm-300 font-medium">Cmdr. Vance</span>
+            <span className="text-storm-300 font-medium">Duty Incident Commander</span>
           </div>
 
           {/* Exit to Landing Page button */}
@@ -227,6 +230,10 @@ export const AppShell: React.FC<AppShellProps> = ({ onExitToLanding }) => {
 
             {activeTab === 'interventions' && (
               <InterventionsView onNavigateToDecisions={() => setActiveTab('decisions')} />
+            )}
+
+            {activeTab === 'briefing' && (
+              <DecisionBriefingView onNavigateToTab={(tab) => setActiveTab(tab as ShellTab)} />
             )}
 
             {activeTab === 'decisions' && (

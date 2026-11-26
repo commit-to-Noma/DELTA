@@ -9,6 +9,7 @@ import {
   gridToProjected,
   gridToLatLon,
 } from '../../data/catchmentLoader';
+import type { OperationalWorkOrder } from '../../simulation/workOrderEngine';
 
 export interface HospitalExposureInfo {
   facility: CriticalFacility;
@@ -51,6 +52,9 @@ export interface CellHoverInfo {
   facility?: CriticalFacility;
   roadName?: string;
   drainageInlet?: ModelledDrainageInlet;
+  stagedWorkOrder?: OperationalWorkOrder;
+  isAdversePondingCell?: boolean;
+  adverseDepthDeltaM?: number;
   passabilityStatus: 'DRY_PASSABLE' | 'CAUTION_MINOR_PONDING' | 'CRITICAL_IMPASSABLE';
   depthBand?: number; // 0, 1, 2, 3, 4
   deltaWaterDepthM?: number; // water avoided vs baseline
@@ -68,6 +72,8 @@ export interface CanvasLayerVisibility {
   facilities: boolean;
   drainage: boolean;
   legend?: boolean;
+  workOrders?: boolean;
+  adversePonding?: boolean;
 }
 
 export interface GeographicSimulationCanvasProps {
@@ -80,10 +86,14 @@ export interface GeographicSimulationCanvasProps {
   selectedCell?: { row: number; col: number } | null;
   selectedRoadId?: string | null;
   selectedFacilityId?: string | null;
+  stagedWorkOrders?: OperationalWorkOrder[];
+  activePlanId?: 'plan-alpha' | 'plan-beta' | 'plan-gamma' | null;
+  selectedWorkOrderId?: string | null;
   onCellHover?: (info: CellHoverInfo | null) => void;
   onCellClick?: (info: CellHoverInfo) => void;
   onSelectRoad?: (road: RoadSegment | null) => void;
   onSelectFacility?: (facility: CriticalFacility | null) => void;
+  onSelectWorkOrder?: (wo: OperationalWorkOrder | null) => void;
 }
 
 export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProps> = ({
@@ -96,10 +106,14 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
   selectedCell,
   selectedRoadId,
   selectedFacilityId,
+  stagedWorkOrders = [],
+  activePlanId = null,
+  selectedWorkOrderId = null,
   onCellHover,
   onCellClick,
   onSelectRoad,
   onSelectFacility,
+  onSelectWorkOrder,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -157,6 +171,16 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     }
     return map;
   }, [dataset.criticalRoads]);
+
+  // Pre-index staged operational work orders by cell [r, c]
+  const workOrderCellMap = useMemo(() => {
+    const map = new Map<string, OperationalWorkOrder>();
+    for (const wo of stagedWorkOrders) {
+      const [r, c] = wo.targetLocation.gridCell;
+      map.set(`${r},${c}`, wo);
+    }
+    return map;
+  }, [stagedWorkOrders]);
 
   // Evaluate rich hospital exposure details
   const getHospitalExposure = useCallback(
@@ -325,10 +349,19 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
 
       // Delta comparison calculation
       let deltaWaterDepthM: number | undefined;
+      let isAdversePondingCell = false;
+      let adverseDepthDeltaM: number | undefined;
       if (baselineWaterDepth) {
         const baseD = baselineWaterDepth[cellIndex] || 0;
         deltaWaterDepthM = Math.round((baseD - depth) * 1000) / 1000;
+        if (deltaWaterDepthM < -0.01) {
+          isAdversePondingCell = true;
+          adverseDepthDeltaM = Math.abs(deltaWaterDepthM);
+        }
       }
+
+      // Check for staged operational work order at this cell
+      const stagedWorkOrder = workOrderCellMap.get(`${row},${col}`);
 
       // Rich hospital exposure
       const hospitalExposure = facility ? getHospitalExposure(facility) : undefined;
@@ -356,6 +389,9 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         facility,
         roadName,
         drainageInlet,
+        stagedWorkOrder,
+        isAdversePondingCell,
+        adverseDepthDeltaM,
         passabilityStatus,
         depthBand,
         deltaWaterDepthM,
@@ -374,6 +410,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       nx,
       roadCellMap,
       waterDepth,
+      workOrderCellMap,
     ]
   );
 
@@ -768,6 +805,122 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       }
     }
 
+    // 8A. Render Adverse Ponding / Deflection Surcharge Hatches
+    if (activeLayers.adversePonding !== false && baselineWaterDepth) {
+      ctx.save();
+      for (let r = 0; r < ny; r++) {
+        for (let c = 0; c < nx; c++) {
+          const idx = r * nx + c;
+          const baseD = baselineWaterDepth[idx] || 0;
+          const currD = waterDepth[idx] || 0;
+          const delta = baseD - currD;
+          // Local water rise > 1cm caused by intervention
+          if (delta <= -0.01) {
+            const x = originX + c * cellSize;
+            const y = originY + r * cellSize;
+
+            ctx.strokeStyle = delta <= -0.05 ? 'rgba(239, 68, 68, 0.95)' : 'rgba(245, 158, 11, 0.90)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(x, y + cellSize);
+            ctx.lineTo(x + cellSize, y);
+            ctx.stroke();
+
+            ctx.strokeStyle = delta <= -0.05 ? '#ef4444' : '#f59e0b';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x, y, cellSize, cellSize);
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // 8B. Render Staged Operational Work Orders & Intervention Targets
+    if (activeLayers.workOrders !== false && stagedWorkOrders && stagedWorkOrders.length > 0) {
+      for (const wo of stagedWorkOrders) {
+        const [r, c] = wo.targetLocation.gridCell;
+        const px = originX + (c + 0.5) * cellSize;
+        const py = originY + (r + 0.5) * cellSize;
+        const isSelected = selectedWorkOrderId === wo.workOrderId;
+
+        let targetColor = '#06b6d4'; // default cyan (Plan Beta)
+        let planBadge = 'PUMP';
+        if (wo.planId === 'plan-alpha') {
+          targetColor = '#f97316'; // orange
+          planBadge = 'BARRIER';
+
+          // Draw physical barrier alignment path
+          const barrierCells: [number, number][] = [[41, 26], [42, 26], [43, 27], [43, 28]];
+          ctx.save();
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([4, 2]);
+          ctx.beginPath();
+          for (let i = 0; i < barrierCells.length; i++) {
+            const [br, bc] = barrierCells[i];
+            const bx = originX + (bc + 0.5) * cellSize;
+            const by = originY + (br + 0.5) * cellSize;
+            if (i === 0) ctx.moveTo(bx, by);
+            else ctx.lineTo(bx, by);
+          }
+          ctx.stroke();
+          ctx.restore();
+        } else if (wo.planId === 'plan-gamma') {
+          targetColor = '#10b981'; // emerald
+          planBadge = 'JETTING';
+        }
+
+        ctx.save();
+
+        // Selected halo
+        if (isSelected) {
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 2.8;
+          ctx.beginPath();
+          ctx.arc(px, py, cellSize * 2.2, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Outer Reticle Ring
+        ctx.strokeStyle = targetColor;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(px, py, cellSize * 1.5, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Crosshairs
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(px - cellSize * 1.8, py);
+        ctx.lineTo(px + cellSize * 1.8, py);
+        ctx.moveTo(px, py - cellSize * 1.8);
+        ctx.lineTo(px, py + cellSize * 1.8);
+        ctx.stroke();
+
+        // Center Core Pill
+        ctx.fillStyle = targetColor;
+        ctx.beginPath();
+        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Tactical Badge Callout
+        ctx.font = 'bold 8.5px monospace';
+        const tagText = `[${planBadge}: ${wo.stage === 'JIRA_LINKED' ? 'JIRA' : wo.stage === 'COMMANDER_STAGED' ? 'STAGED' : 'DRAFT'}]`;
+        const tagWidth = ctx.measureText(tagText).width;
+
+        ctx.fillStyle = 'rgba(8, 12, 16, 0.90)';
+        ctx.fillRect(px - tagWidth / 2 - 3, py - cellSize * 1.6 - 13, tagWidth + 6, 13);
+        ctx.strokeStyle = targetColor;
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(px - tagWidth / 2 - 3, py - cellSize * 1.6 - 13, tagWidth + 6, 13);
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(tagText, px - tagWidth / 2, py - cellSize * 1.6 - 3);
+
+        ctx.restore();
+      }
+    }
+
     // 9. Render Hovered & Selected Cell Reticle
     const activeCell = selectedCell || internalHover;
     if (activeCell) {
@@ -929,6 +1082,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     }
   }, [
     activeLayers,
+    activePlanId,
     baselineWaterDepth,
     dataset,
     getElevationColor,
@@ -940,6 +1094,8 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     selectedCell,
     selectedFacilityId,
     selectedRoadId,
+    selectedWorkOrderId,
+    stagedWorkOrders,
     viewMode,
     waterDepth,
     xmax,
@@ -1014,7 +1170,22 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     const relY = clientY - originY;
 
     if (relX >= 0 && relX < displaySize && relY >= 0 && relY < displaySize) {
-      // 1. Check if clicked near a hospital facility
+      // 1. Check if clicked near a staged work order target
+      if (stagedWorkOrders && stagedWorkOrders.length > 0) {
+        for (const wo of stagedWorkOrders) {
+          const [r, c] = wo.targetLocation.gridCell;
+          const woPx = (c + 0.5) * cellSize;
+          const woPy = (r + 0.5) * cellSize;
+          if (Math.hypot(relX - woPx, relY - woPy) <= 18) {
+            if (onSelectWorkOrder) onSelectWorkOrder(wo);
+            const info = getCellInfo(r, c);
+            if (onCellClick) onCellClick(info);
+            return;
+          }
+        }
+      }
+
+      // 2. Check if clicked near a hospital facility
       for (const fac of dataset.criticalFacilities) {
         const facPx = (fac.gridCell[1] + 0.5) * cellSize;
         const facPy = (fac.gridCell[0] + 0.5) * cellSize;
