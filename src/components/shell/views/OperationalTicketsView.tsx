@@ -17,7 +17,10 @@ import {
   Search, 
   Link as LinkIcon,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Info,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { 
   OperationalWorkOrder, 
@@ -34,6 +37,8 @@ export const OperationalTicketsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [linkInputMap, setLinkInputMap] = useState<Record<string, string>>({});
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [expandedProvenanceIds, setExpandedProvenanceIds] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Load stored work orders on mount
   useEffect(() => {
@@ -41,7 +46,8 @@ export const OperationalTicketsView: React.FC = () => {
   }, []);
 
   const refreshWorkOrders = async () => {
-    // 1. Get locally stored/seed work orders
+    setIsLoading(true);
+    // 1. Get locally stored work orders
     const local = getStoredWorkOrders();
     setWorkOrders(local);
 
@@ -60,18 +66,37 @@ export const OperationalTicketsView: React.FC = () => {
       }
     } catch {
       // In standalone browser mode, fallback cleanly to local state
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Toggle task completion
+  // Toggle provenance disclosure drawer
+  const toggleProvenance = (workOrderId: string) => {
+    setExpandedProvenanceIds(prev => ({
+      ...prev,
+      [workOrderId]: !prev[workOrderId]
+    }));
+  };
+
+  // Toggle task desk-side review check
   const handleToggleTask = (workOrderId: string, stepNumber: number) => {
     const updated = workOrders.map((wo) => {
       if (wo.workOrderId !== workOrderId) return wo;
       const updatedTasks = wo.operationalTasks.map((task) => {
         if (task.stepNumber !== stepNumber) return task;
-        return { ...task, isCompleted: !task.isCompleted };
+        const nextState = !task.isCompleted;
+        return { 
+          ...task, 
+          isCompleted: nextState,
+          reviewStatus: nextState ? ('REVIEWED_FOR_STAGING' as const) : ('PENDING_REVIEW' as const)
+        };
       });
-      const newWo = { ...wo, operationalTasks: updatedTasks, updatedAt: new Date().toISOString() };
+      const newWo: OperationalWorkOrder = { 
+        ...wo, 
+        operationalTasks: updatedTasks, 
+        updatedAt: new Date().toISOString() 
+      };
       saveStoredWorkOrder(newWo);
       invokeSafe('saveWorkOrder', { workOrder: newWo }).catch(() => {});
       return newWo;
@@ -79,20 +104,22 @@ export const OperationalTicketsView: React.FC = () => {
     setWorkOrders(updated);
   };
 
-  // Stage work order for Commander review
+  // Advance work order to COMMANDER_STAGED
   const handleAdvanceToStaged = async (wo: OperationalWorkOrder) => {
     const updated: OperationalWorkOrder = {
       ...wo,
       stage: 'COMMANDER_STAGED',
       humanReview: {
         ...wo.humanReview,
-        reviewedAt: new Date().toISOString()
+        reviewedAt: new Date().toISOString(),
+        stagingStatus: 'STAGED_BY_COMMANDER',
+        stagingNotice: 'Staged by Duty Incident Commander for operational resource planning. Does NOT authorize field dispatch.'
       },
       updatedAt: new Date().toISOString()
     };
     saveStoredWorkOrder(updated);
     setWorkOrders(prev => prev.map(w => w.workOrderId === updated.workOrderId ? updated : w));
-    setActionNotice(`Work order ${wo.workOrderId} advanced to COMMANDER_STAGED! Ready for Jira ticket assignment.`);
+    setActionNotice(`Work order ${wo.workOrderId} advanced to COMMANDER_STAGED. Ready for Jira ticket assignment.`);
     try {
       await invokeSafe('saveWorkOrder', { workOrder: updated });
     } catch {}
@@ -104,15 +131,32 @@ export const OperationalTicketsView: React.FC = () => {
     const issueKey = (linkInputMap[wo.workOrderId] || 'JSM-4902').trim().toUpperCase();
     if (!issueKey) return;
 
-    const updated = linkWorkOrderToIssue(wo.workOrderId, issueKey);
-    if (updated) {
-      setWorkOrders(prev => prev.map(w => w.workOrderId === updated.workOrderId ? updated : w));
-      setActionNotice(`Work order ${wo.workOrderId} bound to Jira issue ${issueKey}!`);
-      try {
-        await invokeSafe('saveWorkOrder', { workOrder: updated });
-      } catch {}
-      setTimeout(() => setActionNotice(null), 5000);
+    try {
+      const serverRes: any = await invokeSafe('linkWorkOrderToIssue', {
+        workOrderId: wo.workOrderId,
+        issueKey
+      });
+
+      if (serverRes && serverRes.success && serverRes.data) {
+        saveStoredWorkOrder(serverRes.data);
+        setWorkOrders(prev => prev.map(w => w.workOrderId === serverRes.data.workOrderId ? serverRes.data : w));
+        setActionNotice(`Work order ${wo.workOrderId} linked to Jira incident ${issueKey}!`);
+      } else {
+        // Fallback local update
+        const updated = linkWorkOrderToIssue(wo.workOrderId, issueKey);
+        if (updated) {
+          setWorkOrders(prev => prev.map(w => w.workOrderId === updated.workOrderId ? updated : w));
+          setActionNotice(`Work order ${wo.workOrderId} bound to Jira issue ${issueKey}!`);
+        }
+      }
+    } catch {
+      const updated = linkWorkOrderToIssue(wo.workOrderId, issueKey);
+      if (updated) {
+        setWorkOrders(prev => prev.map(w => w.workOrderId === updated.workOrderId ? updated : w));
+        setActionNotice(`Work order ${wo.workOrderId} bound to Jira issue ${issueKey}!`);
+      }
     }
+    setTimeout(() => setActionNotice(null), 5000);
   };
 
   // Filtered work orders
@@ -143,13 +187,13 @@ export const OperationalTicketsView: React.FC = () => {
         <Ticket className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
         <div className="text-xs font-mono text-storm-300 space-y-1">
           <div className="font-bold text-storm-100 uppercase tracking-wider flex items-center gap-2">
-            <span>OPERATIONAL WORK ORDERS & JSM FIELD DISPATCH QUEUE</span>
+            <span>OPERATIONAL WORK ORDERS &amp; JSM STAGING QUEUE</span>
             <span className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-700 text-cyan-300 text-[10px]">
-              WORKSTREAM 4 VERIFIED
+              WORKSTREAM 4A VERIFIED
             </span>
           </div>
           <p className="text-storm-300 font-sans">
-            Approved hydrodynamic mitigation decisions transition through rigorous operational staging: from <strong>PREPARED DRAFT</strong> (surveyed coordinates, equipment specifications, and tactical checklists) to <strong>COMMANDER STAGED</strong> and <strong>JIRA LINKED</strong>.
+            Approved hydrodynamic mitigation decisions transition through rigorous operational staging: from <strong>PREPARED DRAFT</strong> to <strong>COMMANDER STAGED</strong> and <strong>JIRA LINKED</strong>. Every operational claim explicitly distinguishes between <em>Source-Verified</em>, <em>Derived</em>, <em>Planning Assumptions</em>, and <em>Unverified</em> content.
           </p>
         </div>
       </div>
@@ -220,15 +264,23 @@ export const OperationalTicketsView: React.FC = () => {
 
       {/* Work Orders List */}
       <div className="space-y-4">
-        {filteredWorkOrders.length === 0 ? (
+        {isLoading ? (
           <div className="p-8 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs">
-            No operational work orders found matching the selected filter criteria.
+            Loading staged operational work orders...
+          </div>
+        ) : filteredWorkOrders.length === 0 ? (
+          <div className="p-8 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs space-y-2">
+            <p>No operational work orders found matching the selected filter criteria.</p>
+            <p className="text-[11px] text-storm-500">
+              Work orders are prepared from approved mitigation decisions in Tab 05 (Decision Records).
+            </p>
           </div>
         ) : (
           filteredWorkOrders.map((wo) => {
-            const completedCount = wo.operationalTasks.filter(t => t.isCompleted).length;
+            const reviewedCount = wo.operationalTasks.filter(t => t.isCompleted).length;
             const totalTasks = wo.operationalTasks.length;
-            const progressPct = totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
+            const progressPct = totalTasks > 0 ? Math.round((reviewedCount / totalTasks) * 100) : 0;
+            const isProvenanceOpen = !!expandedProvenanceIds[wo.workOrderId];
 
             return (
               <div
@@ -301,12 +353,126 @@ export const OperationalTicketsView: React.FC = () => {
                     </p>
                   </div>
 
+                  {/* Provenance Strip & Toggle */}
+                  <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800 flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-storm-500 uppercase font-bold text-[9.5px]">PROVENANCE CLASSIFICATIONS:</span>
+                      <span className="px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-700 text-purple-300 text-[9px] font-bold">
+                        LOCATION: {wo.targetLocation.locationClassification.replace(/_/g, ' ')}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-700 text-amber-300 text-[9px] font-bold">
+                        INGRESS: UNVERIFIED
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-700 text-cyan-300 text-[9px] font-bold">
+                        EVIDENCE: DERIVED (2D SOLVER)
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => toggleProvenance(wo.workOrderId)}
+                      className="text-cyan-400 hover:text-cyan-300 text-[10.5px] font-bold flex items-center gap-1 transition-colors"
+                    >
+                      <Info className="w-3 h-3 text-cyan-400" />
+                      <span>{isProvenanceOpen ? 'HIDE PROVENANCE MANIFEST' : 'INSPECT PROVENANCE MANIFEST'}</span>
+                      {isProvenanceOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
+                  </div>
+
+                  {/* Provenance Manifest Disclosure Drawer */}
+                  {isProvenanceOpen && wo.provenanceManifest && (
+                    <div className="p-3.5 bg-onyx-950/90 rounded border border-cyan-900/60 space-y-2.5 text-[11px] font-mono animate-fadeIn">
+                      <div className="text-cyan-300 font-bold uppercase text-[10px] flex items-center gap-1.5 border-b border-onyx-800 pb-1">
+                        <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>OPERATIONAL EVIDENCE &amp; PROVENANCE ARCHITECTURE MANIFEST</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-storm-400 font-bold uppercase text-[10px]">1. Location Placement</span>
+                            <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[9px]">
+                              {wo.provenanceManifest.targetLocation.classification}
+                            </span>
+                          </div>
+                          <p className="text-storm-300 text-[10px] font-sans">
+                            {wo.provenanceManifest.targetLocation.disclosure}
+                          </p>
+                        </div>
+
+                        <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-storm-400 font-bold uppercase text-[10px]">2. Access Ingress</span>
+                            <span className="px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[9px]">
+                              {wo.provenanceManifest.ingressCorridor.classification}
+                            </span>
+                          </div>
+                          <p className="text-storm-300 text-[10px] font-sans">
+                            {wo.provenanceManifest.ingressCorridor.disclosure}
+                          </p>
+                        </div>
+
+                        <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-storm-400 font-bold uppercase text-[10px]">3. Hydraulic Rate / Sink</span>
+                            <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[9px]">
+                              {wo.provenanceManifest.hydraulicCapacityOrSink.classification}
+                            </span>
+                          </div>
+                          <p className="text-storm-300 text-[10px] font-sans">
+                            {wo.provenanceManifest.hydraulicCapacityOrSink.disclosure}
+                          </p>
+                        </div>
+
+                        <div className="bg-onyx-900 p-2 rounded border border-onyx-800 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-storm-400 font-bold uppercase text-[10px]">4. Adverse Consequences</span>
+                            <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[9px]">
+                              {wo.provenanceManifest.adverseConsequences.classification}
+                            </span>
+                          </div>
+                          <p className="text-storm-300 text-[10px] font-sans">
+                            {wo.provenanceManifest.adverseConsequences.disclosure}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Plan Alpha Adverse Deflection Warning */}
+                  {wo.adverseConsequenceAnalysis?.hasAdverseImpact && (
+                    <div className="bg-amber-950/40 p-3 rounded border border-amber-700/70 space-y-1 text-xs">
+                      <div className="text-amber-300 font-bold uppercase text-[10px] flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                        <span>LOCALIZED ADVERSE FLOODWATER DEFLECTION WARNING</span>
+                        <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-700 text-[9px]">DERIVED</span>
+                      </div>
+                      <p className="text-storm-200 font-sans leading-relaxed">
+                        {wo.adverseConsequenceAnalysis.description}
+                      </p>
+                      {wo.adverseConsequenceAnalysis.mitigationRecommendation && (
+                        <div className="text-[11px] text-amber-200/90 font-sans pt-0.5">
+                          <strong>Mitigation Recommendation:</strong> {wo.adverseConsequenceAnalysis.mitigationRecommendation}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Plan Gamma / Beta Solver Abstraction Disclosure */}
+                  {wo.supportingSimulationEvidence?.solverAbstractionNotice && (
+                    <div className="bg-onyx-950 p-2.5 rounded border border-cyan-900/50 flex items-start gap-2 text-[10.5px] text-cyan-200/90">
+                      <Info className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-cyan-300 uppercase">SOLVER ABSTRACTION DISCLOSURE:</strong>{' '}
+                        {wo.supportingSimulationEvidence.solverAbstractionNotice}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Target Coordinates and Ingress Grid */}
                   <div className="bg-onyx-950 rounded-lg p-3.5 border border-onyx-800 space-y-2.5">
                     <div className="flex items-center justify-between text-storm-400 font-bold text-[10px] uppercase tracking-wider border-b border-onyx-850 pb-1.5">
                       <span className="flex items-center gap-1.5 text-cyan-400">
                         <MapPin className="w-3.5 h-3.5 text-safety-orange" />
-                        AUTHORITATIVE SITE GEOLOCATION & CORRIDOR
+                        TARGET FACILITY &amp; GEOSPATIAL COORDINATES
                       </span>
                       <span className="text-storm-500">
                         GRID CELL: [{wo.targetLocation.gridCell[0]}, {wo.targetLocation.gridCell[1]}]
@@ -315,7 +481,7 @@ export const OperationalTicketsView: React.FC = () => {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5 text-[11px]">
                       <div className="bg-onyx-900/80 p-2 rounded border border-onyx-800">
-                        <span className="text-storm-500 block text-[9px] uppercase">TARGET FACILITY</span>
+                        <span className="text-storm-500 block text-[9px] uppercase">TARGET SITE</span>
                         <span className="text-storm-200 font-bold block truncate" title={wo.targetLocation.name}>
                           {wo.targetLocation.name}
                         </span>
@@ -336,7 +502,7 @@ export const OperationalTicketsView: React.FC = () => {
                       </div>
 
                       <div className="bg-onyx-900/80 p-2 rounded border border-onyx-800">
-                        <span className="text-storm-500 block text-[9px] uppercase">ACCESS CORRIDOR</span>
+                        <span className="text-storm-500 block text-[9px] uppercase">INGRESS ROUTE</span>
                         <span className="text-emerald-300 font-mono font-bold block truncate" title={wo.targetLocation.accessCorridor}>
                           <Navigation className="w-3 h-3 inline mr-1 text-emerald-400" />
                           {wo.targetLocation.accessCorridor}
@@ -354,9 +520,12 @@ export const OperationalTicketsView: React.FC = () => {
                   {/* Tactical Equipment & Crew Requirements */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="bg-onyx-950 p-3 rounded-lg border border-onyx-800 space-y-1.5">
-                      <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5" />
-                        <span>TACTICAL CREW REQUIREMENT</span>
+                      <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5" />
+                          <span>TACTICAL CREW SIZING CONSIDERATION</span>
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[8.5px]">PLANNING ASSUMPTION</span>
                       </div>
                       <div className="text-xs text-storm-200 font-sans">
                         {wo.crewRequirement}
@@ -364,9 +533,12 @@ export const OperationalTicketsView: React.FC = () => {
                     </div>
 
                     <div className="bg-onyx-950 p-3 rounded-lg border border-onyx-800 space-y-1.5">
-                      <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <Wrench className="w-3.5 h-3.5" />
-                        <span>DEPLOYED HEAVY EQUIPMENT & GEAR</span>
+                      <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Wrench className="w-3.5 h-3.5" />
+                          <span>EQUIPMENT PLANNING CONSIDERATIONS</span>
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[8.5px]">PLANNING ASSUMPTION</span>
                       </div>
                       <div className="flex flex-wrap gap-1">
                         {wo.tacticalEquipment.map((eq, i) => (
@@ -378,14 +550,14 @@ export const OperationalTicketsView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Tactical Task Protocol Checklist */}
+                  {/* Chronological Tactical Task Protocol Checklist */}
                   <div className="bg-onyx-950 rounded-lg p-3.5 border border-onyx-800 space-y-2.5">
                     <div className="flex items-center justify-between text-storm-400 font-bold text-[10px] uppercase tracking-wider border-b border-onyx-850 pb-1.5">
                       <span className="flex items-center gap-1.5 text-storm-200">
                         <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
-                        CHRONOLOGICAL OPERATIONAL TASK PROTOCOL ({completedCount}/{totalTasks} VERIFIED)
+                        OPERATIONAL PLANNING REVIEW CHECKLIST ({reviewedCount}/{totalTasks} REVIEWED)
                       </span>
-                      <span className="text-cyan-400">{progressPct}% EXECUTED</span>
+                      <span className="text-cyan-400">{progressPct}% STAGING COMPLETE</span>
                     </div>
 
                     {/* Progress Bar */}
@@ -425,7 +597,7 @@ export const OperationalTicketsView: React.FC = () => {
                               <span className="text-[10px] font-bold px-1.5 py-0.2 bg-onyx-950 border border-onyx-700 rounded text-storm-400">
                                 STEP {t.stepNumber}
                               </span>
-                              <span className={`font-bold text-xs ${t.isCompleted ? 'line-through text-storm-400' : 'text-storm-100'}`}>
+                              <span className={`font-bold text-xs ${t.isCompleted ? 'text-emerald-300' : 'text-storm-100'}`}>
                                 {t.title}
                               </span>
                             </div>
@@ -437,12 +609,16 @@ export const OperationalTicketsView: React.FC = () => {
                             {t.safetyCaution && (
                               <div className="mt-1 p-1.5 rounded bg-amber-950/40 border border-amber-800/60 text-[10px] text-amber-300 flex items-start gap-1.5">
                                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
-                                <span><strong>SAFETY CAUTION:</strong> {t.safetyCaution}</span>
+                                <span><strong>SAFETY NOTE:</strong> {t.safetyCaution}</span>
                               </div>
                             )}
                           </div>
                         </div>
                       ))}
+                    </div>
+
+                    <div className="text-[10px] text-storm-500 italic pt-1">
+                      * Note: Checkbox indicates desk-side operational planning review for staging. Does NOT represent physical field execution or safety certification.
                     </div>
                   </div>
 
@@ -488,7 +664,7 @@ export const OperationalTicketsView: React.FC = () => {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[10px]">
                       <span className="text-storm-400 font-bold uppercase flex items-center gap-1">
                         <ShieldCheck className="w-3.5 h-3.5 text-safety-orange" />
-                        INCIDENT COMMANDER AUTHORIZATION:
+                        DECISION AUTHORIZATION PROVENANCE:
                       </span>
                       <span className="text-storm-200 font-bold">
                         {wo.humanReview.reviewedBy} [{wo.humanReview.role}]

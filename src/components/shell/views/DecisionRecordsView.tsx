@@ -12,7 +12,8 @@ import {
   Truck,
   CheckSquare,
   X,
-  ArrowRight
+  ArrowRight,
+  Info
 } from 'lucide-react';
 import { invokeSafe as invoke } from '../../../services/forgeBridge';
 import { 
@@ -507,11 +508,22 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
               </div>
             </div>
 
-            {/* Target Location & Surveyed Coordinates */}
+            {/* Target Location & Coordinates */}
             <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2">
-              <div className="text-cyan-400 font-bold text-[11px] uppercase flex items-center gap-1.5 border-b border-onyx-800/80 pb-1">
-                <MapPin className="w-3.5 h-3.5 text-safety-orange" />
-                <span>TARGET INFRASTRUCTURE SITE &amp; GEOSPATIAL COORDINATES</span>
+              <div className="text-cyan-400 font-bold text-[11px] uppercase flex items-center justify-between border-b border-onyx-800/80 pb-1">
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-safety-orange" />
+                  <span>TARGET INFRASTRUCTURE SITE &amp; GEOSPATIAL COORDINATES</span>
+                </span>
+                <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                  selectedWorkOrder.targetLocation.locationClassification === 'SOURCE_VERIFIED'
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                    : selectedWorkOrder.targetLocation.locationClassification === 'DERIVED'
+                    ? 'bg-cyan-950 text-cyan-300 border border-cyan-700'
+                    : 'bg-purple-950 text-purple-300 border border-purple-700'
+                }`}>
+                  {selectedWorkOrder.targetLocation.locationClassification.replace(/_/g, ' ')}
+                </span>
               </div>
               <div className="text-storm-100 font-bold text-xs">{selectedWorkOrder.targetLocation.name}</div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[11px] text-storm-300">
@@ -534,20 +546,67 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                   </span>
                 </div>
               </div>
-              <div className="text-[11px] text-storm-400 pt-1">
-                <span className="text-storm-500">Designated Ingress Corridor:</span>{' '}
-                <strong className="text-storm-200">{selectedWorkOrder.targetLocation.accessCorridor}</strong>
+
+              {selectedWorkOrder.targetLocation.provenanceNotice && (
+                <div className="text-[10px] text-storm-400 bg-onyx-900/60 p-2 rounded border border-onyx-850 italic">
+                  * {selectedWorkOrder.targetLocation.provenanceNotice}
+                </div>
+              )}
+
+              <div className="text-[11px] text-storm-400 pt-0.5 flex items-center justify-between">
+                <span>
+                  <span className="text-storm-500">Designated Ingress Corridor:</span>{' '}
+                  <strong className="text-storm-200">{selectedWorkOrder.targetLocation.accessCorridor}</strong>
+                </span>
+                <span className="px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[9px] font-bold">
+                  UNVERIFIED ACCESS ROUTE
+                </span>
               </div>
             </div>
 
+            {/* Adverse Consequence Analysis (Plan Alpha) */}
+            {selectedWorkOrder.adverseConsequenceAnalysis?.hasAdverseImpact && (
+              <div className="bg-amber-950/40 p-3 rounded border border-amber-700/60 space-y-1 text-xs">
+                <div className="text-amber-300 font-bold uppercase text-[10px] flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  <span>LOCALIZED ADVERSE FLOODWATER DEFLECTION WARNING</span>
+                  <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-700 text-[9px]">DERIVED</span>
+                </div>
+                <p className="text-storm-200 font-sans leading-relaxed">
+                  {selectedWorkOrder.adverseConsequenceAnalysis.description}
+                </p>
+                {selectedWorkOrder.adverseConsequenceAnalysis.mitigationRecommendation && (
+                  <div className="text-[11px] text-amber-200/90 font-sans pt-0.5">
+                    <strong>Mitigation Consideration:</strong> {selectedWorkOrder.adverseConsequenceAnalysis.mitigationRecommendation}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Solver Abstraction Notice (Plan Gamma / Beta) */}
+            {selectedWorkOrder.supportingSimulationEvidence?.solverAbstractionNotice && (
+              <div className="bg-onyx-950 p-2.5 rounded border border-cyan-900/50 flex items-start gap-2 text-[10.5px] text-cyan-200/90">
+                <Info className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-cyan-300 uppercase">SOLVER ABSTRACTION DISCLOSURE:</strong>{' '}
+                  {selectedWorkOrder.supportingSimulationEvidence.solverAbstractionNotice}
+                </div>
+              </div>
+            )}
+
             {/* Tactical Equipment & Crew Requirements */}
             <div className="bg-onyx-950 p-3.5 rounded border border-onyx-800 space-y-2">
-              <div className="text-cyan-400 font-bold text-[11px] uppercase flex items-center gap-1.5 border-b border-onyx-800/80 pb-1">
-                <Truck className="w-3.5 h-3.5 text-cyan-400" />
-                <span>TACTICAL EQUIPMENT &amp; CREW REQUIREMENTS</span>
+              <div className="text-cyan-400 font-bold text-[11px] uppercase flex items-center justify-between border-b border-onyx-800/80 pb-1">
+                <span className="flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>TACTICAL EQUIPMENT &amp; CREW CONSIDERATIONS</span>
+                </span>
+                <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-700 text-[9px] font-bold">
+                  PLANNING ASSUMPTION
+                </span>
               </div>
               <div className="text-storm-300 text-[11px]">
-                <span className="text-storm-500">Operational Crew:</span> <strong className="text-storm-100">{selectedWorkOrder.crewRequirement}</strong>
+                <span className="text-storm-500">Operational Crew Consideration:</span> <strong className="text-storm-100">{selectedWorkOrder.crewRequirement}</strong>
               </div>
               <div className="space-y-1 pt-1">
                 {selectedWorkOrder.tacticalEquipment.map((eq, idx) => (
@@ -566,7 +625,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                   <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
                   <span>TACTICAL RESPONSE PROTOCOL ({selectedWorkOrder.operationalTasks.length} PHASES)</span>
                 </span>
-                <span className="text-[10px] text-storm-500 font-normal">Standard Operating Procedure</span>
+                <span className="text-[10px] text-amber-300 font-bold">Desk-Side Review Checklist Only</span>
               </div>
 
               <div className="space-y-2">
@@ -577,7 +636,7 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                         Step {task.stepNumber}: {task.title}
                       </span>
                       <span className="text-[10px] px-1.5 py-0.2 rounded bg-onyx-950 text-storm-400 border border-onyx-800">
-                        {task.isCompleted ? 'VERIFIED' : 'PENDING'}
+                        {task.isCompleted ? 'REVIEWED' : 'PENDING'}
                       </span>
                     </div>
                     <p className="text-storm-300 font-sans text-xs leading-relaxed">
@@ -592,12 +651,16 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
                   </div>
                 ))}
               </div>
+              <div className="text-[10px] text-storm-500 italic">
+                * Note: Checkbox indicates desk-side operational planning review. Does NOT represent physical field verification or task execution.
+              </div>
             </div>
 
             {/* Supporting Hydraulic Simulation Evidence */}
             <div className="bg-onyx-950 p-3 rounded border border-onyx-800 space-y-1.5 text-[11px]">
-              <div className="text-storm-400 font-bold uppercase text-[10px]">
-                SUPPORTING HYDRAULIC SIMULATION EVIDENCE:
+              <div className="text-storm-400 font-bold uppercase text-[10px] flex items-center justify-between">
+                <span>SUPPORTING HYDRAULIC SIMULATION EVIDENCE:</span>
+                <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-700 text-[9px] font-bold">DERIVED</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-storm-300">
                 <div>Avoided Storage: <strong className="text-emerald-400">+{selectedWorkOrder.supportingSimulationEvidence.avoidedSurfaceVolumeM3} m³</strong></div>
@@ -609,8 +672,9 @@ export const DecisionRecordsView: React.FC<DecisionRecordsViewProps> = ({ onNavi
               </div>
             </div>
 
-            {/* Live Dispatch Safety Policy Notice */}
-            <div className="p-2.5 rounded bg-onyx-950 text-storm-400 text-[10px] font-mono border border-onyx-800 space-y-0.5">
+            {/* Desk-Side Planning & Live Dispatch Safety Notice */}
+            <div className="p-2.5 rounded bg-onyx-950 text-storm-400 text-[10px] font-mono border border-onyx-800 space-y-1">
+              <div><strong className="text-cyan-400">PLANNING STAGING BOUNDARY:</strong> {selectedWorkOrder.humanReview.stagingNotice}</div>
               <div><strong className="text-amber-400">LIVE DISPATCH SAFETY POLICY:</strong> {selectedWorkOrder.jiraIntegration.safetyNotice}</div>
             </div>
 

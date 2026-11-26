@@ -483,16 +483,102 @@ export async function listDecisions(storageOverride = null) {
 }
 
 /**
- * Saves a structured operational work order in Forge KVS.
+ * Saves a structured operational work order in Forge KVS with strict integrity,
+ * decision binding, and lifecycle transition checks.
  */
 export async function saveWorkOrder(workOrder, storageOverride = null, authContext = null) {
-  if (!workOrder || !workOrder.workOrderId) {
+  if (!workOrder || typeof workOrder !== 'object') {
+    const err = new Error('Invalid work order payload: payload must be an object.');
+    err.code = 'INVALID_WORK_ORDER_PAYLOAD';
+    throw err;
+  }
+
+  if (!workOrder.workOrderId) {
     const err = new Error('Invalid work order payload: workOrderId is required.');
     err.code = 'INVALID_WORK_ORDER_PAYLOAD';
     throw err;
   }
 
+  if (!workOrder.decisionId) {
+    const err = new Error('Invalid work order payload: decisionId is required.');
+    err.code = 'INVALID_WORK_ORDER_PAYLOAD';
+    throw err;
+  }
+
+  const VALID_STAGES = ['PREPARED_DRAFT', 'COMMANDER_STAGED', 'JIRA_LINKED'];
+  if (workOrder.stage && !VALID_STAGES.includes(workOrder.stage)) {
+    const err = new Error(`Invalid work order stage: '${workOrder.stage}'. Must be one of: ${VALID_STAGES.join(', ')}.`);
+    err.code = 'INVALID_WORK_ORDER_STAGE';
+    throw err;
+  }
+
   const client = getStorageClient(storageOverride);
+
+  // 1. Verify underlying decision record if present in storage
+  const decisionRecord = await client.get(`decision:${workOrder.decisionId}`);
+  if (decisionRecord) {
+    if (decisionRecord.status !== 'APPROVED') {
+      const err = new Error(
+        `Underlying decision '${workOrder.decisionId}' has status '${decisionRecord.status}'. Work orders can only be staged from APPROVED decisions.`
+      );
+      err.code = 'UNAPPROVED_DECISION_BINDING';
+      throw err;
+    }
+
+    // Verify scenario hash integrity
+    if (workOrder.supportingSimulationEvidence?.scenarioHash && decisionRecord.scenarioHash) {
+      if (workOrder.supportingSimulationEvidence.scenarioHash !== decisionRecord.scenarioHash) {
+        const err = new Error(
+          `Integrity violation: Work order scenario hash '${workOrder.supportingSimulationEvidence.scenarioHash}' does not match underlying approved decision hash '${decisionRecord.scenarioHash}'.`
+        );
+        err.code = 'INTEGRITY_VIOLATION';
+        throw err;
+      }
+    }
+
+    // Verify planId binding integrity
+    if (workOrder.planId && decisionRecord.chosenPlan?.planId) {
+      const normWoPlan = String(workOrder.planId).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normDecPlan = String(decisionRecord.chosenPlan.planId).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!normWoPlan.includes(normDecPlan) && !normDecPlan.includes(normWoPlan)) {
+        const err = new Error(
+          `Integrity violation: Work order plan '${workOrder.planId}' does not match underlying decision plan '${decisionRecord.chosenPlan.planId}'.`
+        );
+        err.code = 'INTEGRITY_VIOLATION';
+        throw err;
+      }
+    }
+  }
+
+  // 2. Check existing record for lifecycle transition rules (prevent demotions)
+  const existingRecord = await client.get(`work-order:${workOrder.workOrderId}`);
+  if (existingRecord) {
+    if (existingRecord.stage === 'JIRA_LINKED' && workOrder.stage !== 'JIRA_LINKED') {
+      const err = new Error(
+        `Invalid stage transition: Work order '${workOrder.workOrderId}' is already JIRA_LINKED and cannot be demoted to '${workOrder.stage}'.`
+      );
+      err.code = 'INVALID_STAGE_TRANSITION';
+      throw err;
+    }
+
+    if (existingRecord.stage === 'COMMANDER_STAGED' && workOrder.stage === 'PREPARED_DRAFT') {
+      const err = new Error(
+        `Invalid stage transition: Work order '${workOrder.workOrderId}' is COMMANDER_STAGED and cannot be demoted to PREPARED_DRAFT.`
+      );
+      err.code = 'INVALID_STAGE_TRANSITION';
+      throw err;
+    }
+
+    if (existingRecord.decisionId && existingRecord.decisionId !== workOrder.decisionId) {
+      const err = new Error(
+        `Integrity violation: Cannot alter underlying decision binding of existing work order '${workOrder.workOrderId}' from '${existingRecord.decisionId}' to '${workOrder.decisionId}'.`
+      );
+      err.code = 'IMMUTABLE_DECISION_BINDING';
+      throw err;
+    }
+  }
+
+  // 3. Persist work order in KVS
   await client.set(`work-order:${workOrder.workOrderId}`, workOrder);
 
   // Maintain chronological work orders index
@@ -510,6 +596,131 @@ export async function saveWorkOrder(workOrder, storageOverride = null, authConte
   return {
     success: true,
     data: workOrder
+  };
+}
+
+/**
+ * Links a staged operational work order to a Jira incident issue key.
+ * Requires Incident Commander authorization and ensures the work order is at least COMMANDER_STAGED.
+ */
+export async function linkWorkOrderToIssue(payload, storageOverride = null, authContext = null) {
+  const { workOrderId, issueKey } = payload || {};
+
+  if (!workOrderId || typeof workOrderId !== 'string') {
+    const err = new Error('Invalid input: workOrderId is required.');
+    err.code = 'INVALID_INPUT_WORK_ORDER_ID';
+    throw err;
+  }
+
+  if (!issueKey || typeof issueKey !== 'string') {
+    const err = new Error('Invalid input: issueKey is required.');
+    err.code = 'INVALID_INPUT_ISSUE_KEY';
+    throw err;
+  }
+
+  const issueKeyRegex = /^[A-Z0-9]+-\d+$/;
+  if (!issueKeyRegex.test(issueKey.trim())) {
+    const err = new Error(`Invalid Jira issue key format: '${issueKey}'. Expected format like 'EMERG-101' or 'JSM-4902'.`);
+    err.code = 'INVALID_ISSUE_KEY_FORMAT';
+    throw err;
+  }
+
+  if (!issueKey.trim().toUpperCase().startsWith(`${OPERATIONAL_PROJECT_KEY}-`)) {
+    const err = new Error(
+      `Project scope mismatch: Linked issue '${issueKey}' does not belong to server-configured project '${OPERATIONAL_PROJECT_KEY}'.`
+    );
+    err.code = 'INVALID_PROJECT_SCOPE';
+    throw err;
+  }
+
+  let serverAccountId = null;
+  if (authContext) {
+    serverAccountId =
+      authContext.accountId ||
+      authContext.principal?.accountId ||
+      authContext.context?.accountId ||
+      authContext.context?.principal?.accountId ||
+      null;
+  }
+
+  if (!serverAccountId || typeof serverAccountId !== 'string' || serverAccountId === 'anonymous') {
+    const err = new Error(
+      'Authentication failure: Missing or unverified Jira user session context. Linking work orders to issues requires an authenticated caller.'
+    );
+    err.code = 'UNAUTHENTICATED_SESSION';
+    throw err;
+  }
+
+  // Verify Incident Commander authorization
+  const auth = await verifyIncidentCommanderAuthorization({
+    accountId: serverAccountId,
+    projectKey: OPERATIONAL_PROJECT_KEY,
+    customAuthPolicy: authContext?.customAuthPolicy
+  });
+
+  if (!auth.isAuthorized) {
+    const err = new Error(
+      `Incident Commander authorization denied for account '${serverAccountId}': ${auth.reason || 'User lacks required role to link work orders.'}`
+    );
+    err.code = 'UNAUTHORIZED_INCIDENT_COMMANDER';
+    err.details = auth;
+    throw err;
+  }
+
+  const client = getStorageClient(storageOverride);
+
+  // Retrieve candidate work order
+  const workOrder = await client.get(`work-order:${workOrderId}`);
+  if (!workOrder) {
+    const err = new Error(`Work order not found: No record found for identifier '${workOrderId}'.`);
+    err.code = 'WORK_ORDER_NOT_FOUND';
+    throw err;
+  }
+
+  // Cannot link an unstaged PREPARED_DRAFT work order
+  if (workOrder.stage === 'PREPARED_DRAFT') {
+    const err = new Error(
+      `Unstaged work order: Work order '${workOrderId}' is in PREPARED_DRAFT stage. It must be reviewed and advanced to COMMANDER_STAGED before linking to an official Jira issue.`
+    );
+    err.code = 'UNSTAGED_WORK_ORDER_LINK';
+    throw err;
+  }
+
+  // Verify underlying decision record status
+  if (workOrder.decisionId) {
+    const decisionRecord = await client.get(`decision:${workOrder.decisionId}`);
+    if (decisionRecord && decisionRecord.status !== 'APPROVED') {
+      const err = new Error(
+        `Underlying decision '${workOrder.decisionId}' has status '${decisionRecord.status}'. Only work orders from APPROVED decisions can be linked to Jira.`
+      );
+      err.code = 'UNAPPROVED_DECISION_LINK';
+      throw err;
+    }
+  }
+
+  const serverTimestamp = new Date().toISOString();
+  const updatedWorkOrder = {
+    ...workOrder,
+    stage: 'JIRA_LINKED',
+    jiraIntegration: {
+      ...workOrder.jiraIntegration,
+      linkedIssueKey: issueKey.trim().toUpperCase(),
+      linkedAt: serverTimestamp,
+      linkedBy: serverAccountId
+    },
+    humanReview: {
+      ...workOrder.humanReview,
+      stagingStatus: 'JIRA_INTEGRATED'
+    },
+    updatedAt: serverTimestamp
+  };
+
+  await client.set(`work-order:${workOrderId}`, updatedWorkOrder);
+  await client.set(`issue-work-order:${issueKey.trim().toUpperCase()}`, workOrderId);
+
+  return {
+    success: true,
+    data: updatedWorkOrder
   };
 }
 

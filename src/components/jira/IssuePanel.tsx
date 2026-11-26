@@ -435,7 +435,7 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
             </div>
           </div>
 
-          {/* Staged Operational Work Order (Workstream 4) */}
+          {/* Staged Operational Work Order (Workstream 4A) */}
           {linkedWorkOrder && (
             <div className="bg-onyx-900 rounded-lg p-3.5 border border-cyan-800/80 space-y-3">
               <div className="flex items-center justify-between border-b border-onyx-800 pb-2">
@@ -447,18 +447,31 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="px-1.5 py-0.5 rounded bg-red-950/80 border border-red-800 text-red-300 text-[9px] font-bold">
-                    {linkedWorkOrder.urgency.replace('_', ' ')}
+                    {linkedWorkOrder.urgency.replace(/_/g, ' ')}
                   </span>
                   <span className="px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 text-[9px] font-bold">
-                    {linkedWorkOrder.stage.replace('_', ' ')}
+                    {linkedWorkOrder.stage.replace(/_/g, ' ')}
                   </span>
                 </div>
+              </div>
+
+              {/* Provenance Classification Pills */}
+              <div className="flex flex-wrap gap-1.5 text-[9px] font-mono">
+                <span className="px-1.5 py-0.5 rounded bg-purple-950 border border-purple-700 text-purple-300 font-bold">
+                  LOCATION: {linkedWorkOrder.targetLocation?.locationClassification?.replace(/_/g, ' ') || 'PLANNING ASSUMPTION'}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-700 text-amber-300 font-bold">
+                  INGRESS: UNVERIFIED ROUTE
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-cyan-950 border border-cyan-700 text-cyan-300 font-bold">
+                  EVIDENCE: DERIVED (2D SOLVER)
+                </span>
               </div>
 
               {/* Target Site Coordinates */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
                 <div className="bg-onyx-950 p-2 rounded border border-onyx-800">
-                  <span className="text-storm-500 block uppercase">TARGET SITE & GRID CELL</span>
+                  <span className="text-storm-500 block uppercase">TARGET SITE &amp; RETICLE</span>
                   <span className="text-storm-200 font-bold block truncate">{linkedWorkOrder.targetLocation.name}</span>
                   <span className="text-cyan-400 font-mono block">Grid Cell: [{linkedWorkOrder.targetLocation.gridCell[0]}, {linkedWorkOrder.targetLocation.gridCell[1]}]</span>
                 </div>
@@ -474,14 +487,38 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
                 </div>
               </div>
 
-              {/* Access Route & Equipment */}
+              {/* Adverse Consequence Callout (Plan Alpha) */}
+              {linkedWorkOrder.adverseConsequenceAnalysis?.hasAdverseImpact && (
+                <div className="bg-amber-950/40 p-2.5 rounded border border-amber-800/60 text-[10.5px] space-y-1">
+                  <div className="text-amber-300 font-bold uppercase text-[9.5px] flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>LOCALIZED ADVERSE FLOODWATER DEFLECTION WARNING</span>
+                  </div>
+                  <p className="text-storm-200 font-sans leading-relaxed">
+                    {linkedWorkOrder.adverseConsequenceAnalysis.description}
+                  </p>
+                </div>
+              )}
+
+              {/* Solver Abstraction Disclosure (Plan Gamma / Beta) */}
+              {linkedWorkOrder.supportingSimulationEvidence?.solverAbstractionNotice && (
+                <div className="bg-onyx-950 p-2 rounded border border-cyan-900/50 flex items-start gap-1.5 text-[10px] text-cyan-200/90 font-mono">
+                  <Info className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-cyan-300 uppercase">SOLVER NOTICE:</strong>{' '}
+                    {linkedWorkOrder.supportingSimulationEvidence.solverAbstractionNotice}
+                  </div>
+                </div>
+              )}
+
+              {/* Access Route & Equipment Considerations */}
               <div className="bg-onyx-950 p-2 rounded border border-onyx-800 text-[10px] space-y-1">
                 <div>
                   <span className="text-storm-500 font-bold uppercase">INGRESS ROUTE: </span>
                   <span className="text-emerald-300 font-mono">{linkedWorkOrder.targetLocation.accessCorridor}</span>
                 </div>
                 <div>
-                  <span className="text-storm-500 font-bold uppercase">TACTICAL CREW: </span>
+                  <span className="text-storm-500 font-bold uppercase">CREW SIZING ESTIMATE: </span>
                   <span className="text-storm-200">{linkedWorkOrder.crewRequirement}</span>
                 </div>
                 <div className="pt-1 flex flex-wrap gap-1">
@@ -492,17 +529,18 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
                   ))}
                   {linkedWorkOrder.tacticalEquipment.length > 3 && (
                     <span className="px-1.5 py-0.5 bg-onyx-900 border border-onyx-700 rounded text-[9px] text-storm-400">
-                      +{linkedWorkOrder.tacticalEquipment.length - 3} more units
+                      +{linkedWorkOrder.tacticalEquipment.length - 3} more planning units
                     </span>
                   )}
                 </div>
               </div>
 
-              {/* Protocol Checklist Preview */}
+              {/* Protocol Checklist Summary */}
               <div className="space-y-1 text-[10px]">
-                <span className="text-storm-400 font-bold uppercase block">
-                  TACTICAL TASKS ({linkedWorkOrder.operationalTasks.filter(t => t.isCompleted).length}/{linkedWorkOrder.operationalTasks.length} VERIFIED):
-                </span>
+                <div className="flex items-center justify-between text-storm-400 font-bold uppercase">
+                  <span>TACTICAL PLANNING PROTOCOL ({linkedWorkOrder.operationalTasks.filter(t => t.isCompleted).length}/{linkedWorkOrder.operationalTasks.length} REVIEWED):</span>
+                  <span className="text-amber-400 text-[9px]">PLANNING REVIEW ONLY</span>
+                </div>
                 <div className="space-y-1">
                   {linkedWorkOrder.operationalTasks.slice(0, 3).map((t) => (
                     <div key={t.stepNumber} className="flex items-center gap-1.5 text-storm-300 bg-onyx-950 p-1.5 rounded border border-onyx-800">
@@ -512,10 +550,13 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
                     </div>
                   ))}
                 </div>
+                <div className="text-[9px] text-storm-500 italic pt-0.5">
+                  * Desk-side operational review checklist. Does NOT represent physical field execution.
+                </div>
               </div>
 
               {/* Live Dispatch Safety Boundary Callout */}
-              <div className="bg-onyx-950 p-2 rounded border border-amber-900/50 flex items-start gap-2 text-[10px] text-amber-300">
+              <div className="bg-onyx-950 p-2 rounded border border-amber-900/50 flex items-start gap-2 text-[10px] text-amber-300 font-mono">
                 <Lock className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                 <div>
                   <strong className="text-amber-200">LIVE_DISPATCH_LOCKED:</strong> Autonomous live ticket dispatch is locked by server safety policy. Requires verbal Incident Commander radio order.

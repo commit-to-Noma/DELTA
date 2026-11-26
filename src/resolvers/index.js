@@ -7,6 +7,7 @@ import {
   listDecisions,
   validateDecisionPayload,
   saveWorkOrder,
+  linkWorkOrderToIssue,
   getWorkOrder,
   listWorkOrders,
   getWorkOrderForIssue,
@@ -50,6 +51,7 @@ export {
   listDecisions,
   validateDecisionPayload,
   saveWorkOrder,
+  linkWorkOrderToIssue,
   getWorkOrder,
   listWorkOrders,
   getWorkOrderForIssue,
@@ -362,6 +364,22 @@ resolver.define('listWorkOrders', async () => {
 resolver.define('getWorkOrderForIssue', async (req) => {
   const issueKey = req?.payload?.issueKey || req?.payload || req?.issueKey;
   return await getWorkOrderForIssue(issueKey);
+});
+
+resolver.define('linkWorkOrderToIssue', async (req) => {
+  try {
+    const payload = req?.payload || req;
+    return await linkWorkOrderToIssue(payload, null, req?.context);
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        code: err.code || 'LINK_WORK_ORDER_FAILED',
+        message: err.message,
+        details: err.details
+      }
+    };
+  }
 });
 
 // JSM Field Dispatch Ticket Creation (Custom UI Bridge)
