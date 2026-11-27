@@ -195,11 +195,28 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
             type="button"
             disabled={!isExportSafe}
             onClick={handleDownloadHtml}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-safety-orange hover:bg-orange-600 disabled:opacity-40 text-white font-mono text-[11px] font-bold transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-onyx-800 hover:bg-onyx-700 disabled:opacity-40 text-storm-200 font-mono text-[11px] border border-onyx-700 transition-colors"
           >
             <Printer className="w-3.5 h-3.5" />
             Export HTML
           </button>
+
+          {activeDecisionForScenario ? (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-mono text-[11px] font-bold">
+              <Check className="w-3.5 h-3.5" />
+              Approved: {activeDecisionForScenario.decisionId || activeDecisionForScenario.id}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => navigate('interventions')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white font-mono text-[11px] font-bold transition-colors"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Approve Decision → (Step 03)
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

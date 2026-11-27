@@ -330,16 +330,16 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
               setApprovalError(null);
               setIsApprovalModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-onyx-800 hover:bg-onyx-700 border border-safety-orange/60 text-white text-[11px] font-mono font-bold transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white text-[11px] font-mono font-bold transition-colors disabled:opacity-50"
           >
-            <ShieldCheck className="w-3.5 h-3.5 text-safety-orange" />
-            <span>Authorize {selectedPlanId.replace('plan-', 'Plan ').toUpperCase()}</span>
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Approve Decision — {selectedPlanId.replace('plan-', 'Plan ').toUpperCase()}</span>
           </button>
 
           <button
             type="button"
             onClick={handleProceedToBriefing}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white text-xs font-mono font-bold transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-onyx-800 hover:bg-onyx-700 border border-onyx-700 text-white text-xs font-mono font-bold transition-colors"
           >
             <span>Decision &amp; Briefing</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -694,7 +694,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
             <div className="flex items-center justify-between border-b border-onyx-800 pb-3">
               <div className="flex items-center gap-2 text-sm font-bold text-white">
                 <ShieldCheck className="w-5 h-5 text-safety-orange" />
-                <span>Authorize Immutable Decision Record</span>
+                <span>Approve Decision &amp; Record It</span>
               </div>
               <button
                 type="button"
