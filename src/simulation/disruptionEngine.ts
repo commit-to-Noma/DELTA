@@ -547,6 +547,52 @@ function getScheduleRateAtElapsed(schedule: RainfallScheduleInput, elapsedSecond
  * Executes a full spatial 2D solver comparison between unobstructed nominal drainage
  * and the active set of physical drainage disruptions under the exact selected rainfall profile.
  */
+// Screening solves run on a 2x-coarsened grid (4x fewer cells, larger stable
+// sub-steps) and are upsampled back to full resolution for display deltas.
+function coarsenHydraulicConfig(config: HydraulicGridConfig, factor: number): HydraulicGridConfig {
+  const nx = Math.floor(config.nx / factor);
+  const ny = Math.floor(config.ny / factor);
+  const elevation = new Float64Array(nx * ny);
+  const infiltrationRate = config.infiltrationRate ? new Float64Array(nx * ny) : undefined;
+  for (let r = 0; r < ny; r++) {
+    for (let c = 0; c < nx; c++) {
+      let eSum = 0;
+      let iSum = 0;
+      for (let dr = 0; dr < factor; dr++) {
+        for (let dc = 0; dc < factor; dc++) {
+          const src = (r * factor + dr) * config.nx + (c * factor + dc);
+          eSum += config.elevation[src] || 0;
+          if (infiltrationRate && config.infiltrationRate) iSum += config.infiltrationRate[src] || 0;
+        }
+      }
+      elevation[r * nx + c] = eSum / (factor * factor);
+      if (infiltrationRate) infiltrationRate[r * nx + c] = iSum / (factor * factor);
+    }
+  }
+  const remap = (index: number) => Math.floor(Math.floor(index / config.nx) / factor) * nx + Math.floor((index % config.nx) / factor);
+  return {
+    ...config,
+    nx,
+    ny,
+    dx: config.dx * factor,
+    elevation,
+    infiltrationRate,
+    drainageInlets: (config.drainageInlets || []).map((inlet) => ({ ...inlet, index: remap(inlet.index) })),
+    openBoundaryIndices: [...new Set((config.openBoundaryIndices || []).map(remap))]
+  };
+}
+
+function upsampleDepth(depth: Float64Array, nx: number, ny: number, factor: number): Float64Array {
+  const coarseNx = Math.floor(nx / factor);
+  const out = new Float64Array(nx * ny);
+  for (let r = 0; r < ny; r++) {
+    for (let c = 0; c < nx; c++) {
+      out[r * nx + c] = depth[Math.floor(r / factor) * coarseNx + Math.floor(c / factor)] || 0;
+    }
+  }
+  return out;
+}
+
 export function* executeSpatialDisruptionComparisonSteps(
   dataset: BostonCatchmentDataset,
   activeDisruptionIds: string[],
@@ -589,13 +635,18 @@ export function* executeSpatialDisruptionComparisonSteps(
 
   const numSteps = Math.max(1, Math.floor(schedule.durationSeconds / dtMacro));
 
+  const coarsenFactor = nx >= 64 ? 2 : 1;
+  const nominalSolveConfig = coarsenFactor > 1 ? coarsenHydraulicConfig(nominalConfig, coarsenFactor) : nominalConfig;
+  const disruptedSolveConfig = coarsenFactor > 1 ? coarsenHydraulicConfig(disruptedConfig, coarsenFactor) : disruptedConfig;
+
   // Step Nominal State
-  let nominalState: SimulationState = createHydraulicState(nominalConfig);
+  let nominalState: SimulationState = createHydraulicState(nominalSolveConfig);
   for (let s = 0; s < numSteps; s++) {
     const rate = getScheduleRateAtElapsed(schedule, s * dtMacro);
     nominalState = stepHydraulics(nominalState, {
       dtMacroSeconds: dtMacro,
-      rainfallRateMmPerHour: rate
+      rainfallRateMmPerHour: rate,
+      maxSubStepSeconds: 5.0
     });
     if (s % 20 === 19) yield;
   }
@@ -612,15 +663,22 @@ export function* executeSpatialDisruptionComparisonSteps(
       }
     };
   } else {
-    disruptedState = createHydraulicState(disruptedConfig);
+    disruptedState = createHydraulicState(disruptedSolveConfig);
     for (let s = 0; s < numSteps; s++) {
       const rate = getScheduleRateAtElapsed(schedule, s * dtMacro);
       disruptedState = stepHydraulics(disruptedState, {
         dtMacroSeconds: dtMacro,
-        rainfallRateMmPerHour: rate
+        rainfallRateMmPerHour: rate,
+        maxSubStepSeconds: 5.0
       });
       if (s % 20 === 19) yield;
     }
+  }
+
+  if (coarsenFactor > 1) {
+    const fullNy = nominalConfig.ny;
+    nominalState = { ...nominalState, waterDepth: upsampleDepth(nominalState.waterDepth, nx, fullNy, coarsenFactor) };
+    disruptedState = { ...disruptedState, waterDepth: upsampleDepth(disruptedState.waterDepth, nx, fullNy, coarsenFactor) };
   }
 
   // Max depths and spatial differences

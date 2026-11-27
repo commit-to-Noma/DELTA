@@ -206,6 +206,7 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
   // 3. Strictly Keyed Solver Caches (prevents stale cross-scenario reads)
   const evaluationCacheRef = useRef<Map<string, CachedEvaluationEntry>>(new Map());
   const disruptionCacheRef = useRef<Map<string, CachedDisruptionEntry>>(new Map());
+  const disruptionInFlightRef = useRef<Set<string>>(new Set());
 
   const [currentEvaluationEntry, setCurrentEvaluationEntry] = useState<CachedEvaluationEntry | null>(null);
   const [isComputingEvaluation, setIsComputingEvaluation] = useState<boolean>(false);
@@ -340,6 +341,8 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
       return;
     }
 
+    if (disruptionInFlightRef.current.has(targetKey)) return;
+    disruptionInFlightRef.current.add(targetKey);
     setCurrentDisruptionEntry((prev) => (prev && prev.configKey === targetKey ? prev : null));
     setIsComputingDisruption(true);
 
@@ -360,6 +363,7 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
         disruptionCacheRef.current.set(targetKey, entry);
         setCurrentDisruptionEntry(entry);
       } finally {
+        disruptionInFlightRef.current.delete(targetKey);
         setIsComputingDisruption(false);
       }
     })();
