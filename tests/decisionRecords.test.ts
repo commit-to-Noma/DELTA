@@ -132,6 +132,19 @@ describe('Phase 5: Decision Records & Human Approval Suite', () => {
       .rejects.toThrow(/scenarioHash must be a non-empty cryptographic/);
   });
 
+  it('TEST-DEC-03B: Derives scenarioHash server-side when UI omits it but supplies canonicalScenario', async () => {
+    const { scenarioHash: _omit, ...withoutHash } = VALID_PHASE5_DECISION_PAYLOAD;
+    const payload = {
+      ...withoutHash,
+      decisionId: 'DEC-2026-0502B',
+      canonicalScenario: { ...CANONICAL_SCENARIO_INPUTS, briefingScenarioHash: '0XBRIEFING123' }
+    };
+    const res = await recordDecision(payload, null, AUTHENTICATED_COMMANDER_AUTH);
+    expect(res.success).toBe(true);
+    expect(res.data.scenarioHash).toBe(AUTHORITATIVE_SCENARIO_HASH);
+    expect(res.data.canonicalScenario.briefingScenarioHash).toBe('0XBRIEFING123');
+  });
+
   // TEST 4: Invalid scenario hash mismatch
   it('TEST-DEC-04: Rejects records where client scenarioHash does not match canonical recomputed hash', async () => {
     const mismatchPayload = {

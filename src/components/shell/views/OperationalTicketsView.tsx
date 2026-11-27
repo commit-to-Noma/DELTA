@@ -48,23 +48,30 @@ export const OperationalTicketsView: React.FC = () => {
   const [expandedProvenanceIds, setExpandedProvenanceIds] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [dispatchedLinks, setDispatchedLinks] = useState<Record<string, { issueKey: string; issueUrl?: string }>>({});
+  const [dispatchState, setDispatchState] = useState<Record<string, { status: 'working' | 'error' | 'success'; message: string }>>({});
   const handleDispatchLive = async (wo: OperationalWorkOrder) => {
+    setDispatchState(prev => ({ ...prev, [wo.workOrderId]: { status: 'working', message: 'Contacting Jira…' } }));
     setActionNotice(`Dispatching live Jira issue for ${wo.workOrderId}…`);
     try {
       const res: any = await invokeSafe('createDispatchTicket', { decisionId: wo.decisionId });
       if (res?.success && res.issueKey) {
         setDispatchedLinks(prev => ({ ...prev, [wo.workOrderId]: { issueKey: res.issueKey, issueUrl: res.issueUrl || res.self } }));
+        setDispatchState(prev => ({ ...prev, [wo.workOrderId]: { status: 'success', message: `Created ${res.issueKey}` } }));
         setActionNotice(`Live Jira issue ${res.issueKey} created for ${wo.workOrderId}.`);
         setTimeout(() => setActionNotice(null), 12000);
       } else {
         const raw = res?.error?.message || res?.message || '';
-        setActionNotice(
-          /not found/i.test(raw)
-            ? 'No approved decision on the server yet — go to Step 03 Interventions → "Approve Decision", then dispatch again. (Nothing was created.)'
-            : raw || 'Live dispatch requires Forge Jira access; no ticket was created.'
-        );
+        const friendly = /not found/i.test(raw)
+          ? 'This work order is a demo seed — its decision was never approved on the server, so there is nothing to dispatch. Go to Step 03 → Approve Decision (a real work order is created automatically), then come back and dispatch that one. (Nothing was created.)'
+          : raw || 'Live dispatch requires Forge Jira access; no ticket was created.';
+        setDispatchState(prev => ({ ...prev, [wo.workOrderId]: { status: 'error', message: friendly } }));
+        setActionNotice(friendly);
       }
-    } catch (e: any) { setActionNotice(e?.message || 'Live dispatch failed; no ticket confirmed.'); }
+    } catch (e: any) {
+      const msg = e?.message || 'Live dispatch failed; no ticket confirmed.';
+      setDispatchState(prev => ({ ...prev, [wo.workOrderId]: { status: 'error', message: msg } }));
+      setActionNotice(msg);
+    }
   };
 
   // Load stored work orders on mount
@@ -761,7 +768,10 @@ export const OperationalTicketsView: React.FC = () => {
                         </div>
                       )}
                       {(wo.stage === 'COMMANDER_STAGED' || wo.stage === 'JIRA_LINKED') && (
-                        <button onClick={() => handleDispatchLive(wo)} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-xs whitespace-nowrap">DISPATCH LIVE JIRA ISSUE</button>
+                        <button onClick={() => handleDispatchLive(wo)} disabled={dispatchState[wo.workOrderId]?.status === 'working'} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded font-bold text-xs whitespace-nowrap">{dispatchState[wo.workOrderId]?.status === 'working' ? 'DISPATCHING…' : 'DISPATCH LIVE JIRA ISSUE'}</button>
+                      )}
+                      {dispatchState[wo.workOrderId] && (
+                        <span className={`text-xs font-bold ${dispatchState[wo.workOrderId].status === 'error' ? 'text-red-300' : dispatchState[wo.workOrderId].status === 'success' ? 'text-emerald-300' : 'text-cyan-300'}`}>{dispatchState[wo.workOrderId].message}</span>
                       )}
                       {dispatchedLinks[wo.workOrderId] && (
                         dispatchedLinks[wo.workOrderId].issueUrl
