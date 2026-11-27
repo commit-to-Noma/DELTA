@@ -100,6 +100,10 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvedRecord, setApprovedRecord] = useState<any | null>(null);
+  const [publishToConfluence, setPublishToConfluence] = useState<boolean>(false);
+  const [confluenceNotice, setConfluenceNotice] = useState<string | null>(null);
+  const [confluenceSpaceKey, setConfluenceSpaceKey] = useState<string>('');
+  const [confluencePageUrl, setConfluencePageUrl] = useState<string | null>(null);
 
   const selectedPlanDef: InterventionDefinition = AUTHORITATIVE_INTERVENTIONS[selectedPlanId];
   const selectedDiff = evaluationResult?.differentials[selectedPlanId] || null;
@@ -245,6 +249,12 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
           createdAt: new Date().toISOString()
         };
         setApprovedRecord(saved);
+        if (publishToConfluence) {
+          try {
+            const pub: any = await invokeSafe('publishAuditToConfluence', { decisionId: saved.decisionId, spaceKey: confluenceSpaceKey.trim() || undefined });
+            if (pub?.success) { setConfluencePageUrl(pub.pageUrl || null); setConfluenceNotice(`Audit page published to Confluence space ${pub.spaceKey || confluenceSpaceKey || '(auto-discovered)'}${pub.pageId ? ` (page ${pub.pageId})` : ''}.`); } else setConfluenceNotice(pub?.error?.message || pub?.message || 'Confluence audit export was not completed (requires Forge Confluence access).');
+          } catch { setConfluenceNotice('Confluence audit export was not completed (requires Forge Confluence access).'); }
+        }
         registerNewDecision(saved);
         await refreshGovernanceRecords();
         setIsApprovalModalOpen(false);
@@ -409,6 +419,13 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
           >
             Inspect in Decision &amp; Briefing →
           </button>
+        </div>
+      )}
+
+      {confluenceNotice && (
+        <div className="bg-cyan-950/40 border border-cyan-700/60 rounded px-3.5 py-2 text-xs font-mono text-cyan-200">
+          {confluenceNotice}{' '}
+          {confluencePageUrl && <a href={confluencePageUrl} target="_blank" rel="noreferrer" className="underline font-bold text-cyan-300">Open audit page</a>}
         </div>
       )}
 
@@ -721,6 +738,17 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
                   </span>
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 text-[11px] text-storm-300">
+                <input type="checkbox" checked={publishToConfluence} onChange={(e) => setPublishToConfluence(e.target.checked)} />
+                <span>Publish audit page to Confluence (opt-in, OFF by default)</span>
+              </label>
+              {publishToConfluence && (
+                <input type="text" value={confluenceSpaceKey} onChange={(e) => setConfluenceSpaceKey(e.target.value)} placeholder="Space key (optional — first available space is auto-discovered)" aria-label="Confluence space key (optional)" className="w-full bg-onyx-950 border border-onyx-700 rounded px-2.5 py-1.5 text-[11px] text-storm-100 placeholder-storm-500 focus:outline-none focus:border-cyan-500" />
+              )}
+              {confluenceNotice && <div className="text-[11px] text-cyan-300">{confluenceNotice}</div>}
             </div>
 
             <div className="space-y-1">

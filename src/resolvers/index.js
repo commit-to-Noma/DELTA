@@ -42,6 +42,7 @@ import {
   AUTHORITATIVE_GRAPH_NODES,
   AUTHORITATIVE_GRAPH_EDGES
 } from './teamworkGraph.js';
+import { publishAuditToConfluence } from './confluenceAudit.js';
 
 export {
   recordDecision,
@@ -74,7 +75,8 @@ export {
   queryTeamworkGraph,
   queryFacilityDrainageDependencies,
   AUTHORITATIVE_GRAPH_NODES,
-  AUTHORITATIVE_GRAPH_EDGES
+  AUTHORITATIVE_GRAPH_EDGES,
+  publishAuditToConfluence
 };
 
 function resolveResolverConstructor(mod) {
@@ -400,8 +402,9 @@ resolver.define('dispatchFieldTeam', async (req) => {
 });
 
 // Teamwork Graph Query operations (Custom UI Bridge & Backend)
-resolver.define('queryTeamworkGraph', async (req) => await queryTeamworkGraph(req?.payload?.filterType || req?.filterType));
-resolver.define('queryFacilityDrainageDependencies', async (req) => await queryFacilityDrainageDependencies(req?.payload?.facilityId || req?.facilityId));
+resolver.define('queryTeamworkGraph', async (req) => await queryTeamworkGraph(req?.payload?.filterType || req?.filterType, { context: req?.context }));
+resolver.define('queryFacilityDrainageDependencies', async (req) => await queryFacilityDrainageDependencies(req?.payload?.facilityId || req?.facilityId, { context: req?.context }));
+resolver.define('publishAuditToConfluence', async (req) => await publishAuditToConfluence(req?.payload || req, { context: req?.context }));
 
 const customUiHandler = resolver.getDefinitions();
 
@@ -455,11 +458,15 @@ export async function handler(event, context) {
 
     case 'query-teamwork-graph':
     case 'queryTeamworkGraph':
-      return await queryTeamworkGraph(payload.filterType);
+      return await queryTeamworkGraph(payload.filterType, { context });
 
     case 'query-facility-dependencies':
     case 'queryFacilityDrainageDependencies':
-      return await queryFacilityDrainageDependencies(payload.facilityId);
+      return await queryFacilityDrainageDependencies(payload.facilityId, { context });
+
+    case 'publish-audit-to-confluence':
+    case 'publishAuditToConfluence':
+      return await publishAuditToConfluence(payload, { context });
 
     default:
       return {
@@ -475,7 +482,8 @@ export async function handler(event, context) {
             'record-decision',
             'dispatch-field-team',
             'query-teamwork-graph',
-            'query-facility-dependencies'
+            'query-facility-dependencies',
+            'publish-audit-to-confluence'
           ]
         }
       };

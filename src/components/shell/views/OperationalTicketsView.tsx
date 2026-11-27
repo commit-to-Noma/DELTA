@@ -47,6 +47,15 @@ export const OperationalTicketsView: React.FC = () => {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [expandedProvenanceIds, setExpandedProvenanceIds] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [dispatchedLinks, setDispatchedLinks] = useState<Record<string, { issueKey: string; issueUrl?: string }>>({});
+  const handleDispatchLive = async (wo: OperationalWorkOrder) => {
+    try {
+      const res: any = await invokeSafe('createDispatchTicket', { decisionId: wo.decisionId });
+      if (res?.success && res.issueKey) { setDispatchedLinks(prev => ({ ...prev, [wo.workOrderId]: { issueKey: res.issueKey, issueUrl: res.issueUrl || res.self } })); setActionNotice(`Live Jira issue ${res.issueKey} created for ${wo.workOrderId}.`); }
+      else setActionNotice(res?.error?.message || res?.message || 'Live dispatch requires Forge Jira access; no ticket was created.');
+    } catch (e: any) { setActionNotice(e?.message || 'Live dispatch failed; no ticket confirmed.'); }
+    setTimeout(() => setActionNotice(null), 8000);
+  };
 
   // Load stored work orders on mount
   useEffect(() => {
@@ -741,12 +750,20 @@ export const OperationalTicketsView: React.FC = () => {
                           <ExternalLink className="w-3.5 h-3.5 text-storm-500" />
                         </div>
                       )}
+                      {(wo.stage === 'COMMANDER_STAGED' || wo.stage === 'JIRA_LINKED') && (
+                        <button onClick={() => handleDispatchLive(wo)} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-xs whitespace-nowrap">DISPATCH LIVE JIRA ISSUE</button>
+                      )}
+                      {dispatchedLinks[wo.workOrderId] && (
+                        dispatchedLinks[wo.workOrderId].issueUrl
+                          ? <a href={dispatchedLinks[wo.workOrderId].issueUrl} target="_blank" rel="noreferrer" className="text-cyan-300 underline font-bold text-xs">{dispatchedLinks[wo.workOrderId].issueKey}</a>
+                          : <span className="text-emerald-300 font-bold text-xs">{dispatchedLinks[wo.workOrderId].issueKey}</span>
+                      )}
                     </div>
 
                     {/* Safety Notice / Truth Gate */}
                     <div className="flex items-center gap-1.5 text-[10px] text-storm-400 bg-onyx-950 px-2.5 py-1 rounded border border-onyx-800">
                       <Lock className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                      <span>{wo.jiraIntegration.dispatchStatus}: Server lock active (manual dispatch required)</span>
+                      <span>{dispatchedLinks[wo.workOrderId] ? `Dispatched: ${dispatchedLinks[wo.workOrderId].issueKey}` : `${wo.jiraIntegration.dispatchStatus}: Human-triggered live dispatch available`}</span>
                     </div>
                   </div>
                 </div>

@@ -70,6 +70,14 @@ export async function invokeSafe(functionKey: string, payload?: any): Promise<an
     }
   }
 
+  if (functionKey === 'createDispatchTicket' || functionKey === 'dispatchFieldTeam') {
+    return { success: false, error: { code: 'DISPATCH_UNAVAILABLE_OUTSIDE_FORGE', message: 'Live dispatch requires a Forge runtime with Jira access. No Jira issue was created outside Forge.' } };
+  }
+
+  if (functionKey === 'publishAuditToConfluence') {
+    return { success: false, error: { code: 'CONFLUENCE_UNAVAILABLE_OUTSIDE_FORGE', message: 'Confluence audit export requires a Forge runtime. No page was created outside Forge.' } };
+  }
+
   if (functionKey === 'saveSimulationRun') {
     return { success: true, status: 'COMPLETED_RUN', message: 'Saved in local session' };
   }
