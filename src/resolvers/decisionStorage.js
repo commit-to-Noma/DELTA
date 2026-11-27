@@ -42,9 +42,25 @@
 import { kvs as forgeKvs } from '@forge/kvs';
 import {
   verifyIncidentCommanderAuthorization,
-  AUTHORIZATION_POLICY_NAME,
-  OPERATIONAL_PROJECT_KEY
+  AUTHORIZATION_POLICY_NAME
 } from './authPolicy.js';
+import { resolveProjectForRecord, assertProjectBinding, projectKeyFromIssueKey } from './projectContext.js';
+
+function projectBindingError(context, payload, issueKey = null) {
+  const binding = resolveProjectForRecord({ context, authContext: context, payload, issueKey });
+  if (binding.trusted) {
+    const msg = assertProjectBinding({ trustedProjectKey: binding.projectKey, candidateIssueKey: issueKey || payload?.linkedIssueKey || payload?.issueKey, candidateProjectKey: payload?.projectKey });
+    if (msg) return { binding, msg };
+  }
+  if (payload?.projectKey && (payload?.linkedIssueKey || issueKey)) {
+    const msg = assertProjectBinding({ trustedProjectKey: payload.projectKey, candidateIssueKey: payload.linkedIssueKey || issueKey });
+    if (msg) return { binding, msg };
+  }
+  return { binding, msg: null };
+}
+function bindingAuthProject(binding, issueKey = null) {
+  return binding.projectKey || projectKeyFromIssueKey(issueKey);
+}
 import { computeCanonicalScenarioHash } from './simulationValidation.js';
 
 // Fallback in-memory map for environments where Forge KVS runtime fetch bridge is not bound (e.g. unit tests, local preview)
@@ -195,11 +211,10 @@ export async function recordDecision(payload, storageOverride = null, authContex
     throw err;
   }
 
-  // 2. Strict Project Scoping: Must be OPERATIONAL_PROJECT_KEY ('EMERG')
-  if (payload?.linkedIssueKey && !payload.linkedIssueKey.startsWith(`${OPERATIONAL_PROJECT_KEY}-`)) {
-    const err = new Error(
-      `Project scope mismatch: Linked issue '${payload.linkedIssueKey}' does not belong to server-configured project '${OPERATIONAL_PROJECT_KEY}'. Client attempts to override project key are forbidden.`
-    );
+  // 2. Dynamic project scoping: bind to trusted Forge context project when present.
+  const { binding: recordBinding, msg: recordBindingMsg } = projectBindingError(authContext, payload);
+  if (recordBindingMsg) {
+    const err = new Error(recordBindingMsg);
     err.code = 'INVALID_PROJECT_SCOPE';
     throw err;
   }
@@ -225,8 +240,11 @@ export async function recordDecision(payload, storageOverride = null, authContex
   // 6. Verify Incident Commander Authorization Policy
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: serverAccountId,
-    projectKey: OPERATIONAL_PROJECT_KEY,
-    customAuthPolicy: authContext?.customAuthPolicy
+    projectKey: bindingAuthProject(recordBinding, payload?.linkedIssueKey),
+    projectId: recordBinding.projectId,
+    context: authContext,
+    customAuthPolicy: authContext?.customAuthPolicy,
+    customJiraClient: authContext?.customRoleClient
   });
 
   if (!auth.isAuthorized) {
@@ -243,7 +261,7 @@ export async function recordDecision(payload, storageOverride = null, authContex
   const verifiedApprover = {
     displayName: payload.humanApprover?.displayName || 'Incident Commander',
     accountId: serverAccountId,
-    role: 'Incident Commander',
+    role: auth.role || 'Incident Commander',
     authorizationPolicy: auth.policy || AUTHORIZATION_POLICY_NAME,
     approvalTimestamp: serverTimestamp,
     verifiedAt: serverTimestamp
@@ -279,7 +297,9 @@ export async function recordDecision(payload, storageOverride = null, authContex
     baselineMetrics: payload.baselineMetrics || payload.physicalMetrics || null,
     interventionMetrics: payload.interventionMetrics || null,
     differentialMetrics: payload.differentialMetrics || null,
-    evaluationReference: payload.evaluationReference || payload.scenarioId || null
+    evaluationReference: payload.evaluationReference || payload.scenarioId || null,
+    projectKey: bindingAuthProject(recordBinding, payload.linkedIssueKey) || null,
+    projectId: recordBinding.projectId || payload.projectId || null
   };
 
   // 9. Persist to Forge KVS
@@ -356,7 +376,7 @@ export async function getDecisionForIssue(issueKey, storageOverride = null) {
 /**
  * Authoritatively links an approved Decision Record to a target Jira Issue.
  * Enforces:
- * 1. Target issueKey belongs to OPERATIONAL_PROJECT_KEY ('EMERG-').
+ * 1. Target issueKey's project matches the trusted Forge project when present.
  * 2. Caller has verified Incident Commander authorization.
  * 3. Target decision exists in KVS and status === 'APPROVED'.
  * 4. Updates bidirectional pointer mapping (issue-decision:<issueKey> and decision.linkedIssueKey).
@@ -374,11 +394,9 @@ export async function linkDecisionToIssue({ issueKey, decisionId }, storageOverr
     throw err;
   }
 
-  // Strict Project Scoping: Must belong to OPERATIONAL_PROJECT_KEY ('EMERG')
-  if (!issueKey.startsWith(`${OPERATIONAL_PROJECT_KEY}-`)) {
-    const err = new Error(
-      `Project scope mismatch: Linked issue '${issueKey}' does not belong to server-configured project '${OPERATIONAL_PROJECT_KEY}'.`
-    );
+  const { binding: linkBinding, msg: linkBindingMsg } = projectBindingError(authContext, null, issueKey);
+  if (linkBindingMsg) {
+    const err = new Error(linkBindingMsg);
     err.code = 'INVALID_PROJECT_SCOPE';
     throw err;
   }
@@ -405,8 +423,11 @@ export async function linkDecisionToIssue({ issueKey, decisionId }, storageOverr
   // Verify Incident Commander authorization
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: serverAccountId,
-    projectKey: OPERATIONAL_PROJECT_KEY,
-    customAuthPolicy: authContext?.customAuthPolicy
+    projectKey: bindingAuthProject(linkBinding, issueKey),
+    projectId: linkBinding.projectId,
+    context: authContext,
+    customAuthPolicy: authContext?.customAuthPolicy,
+    customJiraClient: authContext?.customRoleClient
   });
 
   if (!auth.isAuthorized) {
@@ -425,6 +446,12 @@ export async function linkDecisionToIssue({ issueKey, decisionId }, storageOverr
   if (!decisionRecord) {
     const err = new Error(`Decision not found: No record found for identifier '${decisionId}'.`);
     err.code = 'DECISION_NOT_FOUND';
+    throw err;
+  }
+
+  if (decisionRecord.projectKey && decisionRecord.projectKey !== projectKeyFromIssueKey(issueKey)) {
+    const err = new Error(`Project scope mismatch: Decision '${decisionId}' is bound to project '${decisionRecord.projectKey}', not issue project '${projectKeyFromIssueKey(issueKey)}'.`);
+    err.code = 'INVALID_PROJECT_SCOPE';
     throw err;
   }
 
@@ -625,10 +652,9 @@ export async function linkWorkOrderToIssue(payload, storageOverride = null, auth
     throw err;
   }
 
-  if (!issueKey.trim().toUpperCase().startsWith(`${OPERATIONAL_PROJECT_KEY}-`)) {
-    const err = new Error(
-      `Project scope mismatch: Linked issue '${issueKey}' does not belong to server-configured project '${OPERATIONAL_PROJECT_KEY}'.`
-    );
+  const { binding: woBinding, msg: woBindingMsg } = projectBindingError(authContext, payload, issueKey.trim().toUpperCase());
+  if (woBindingMsg) {
+    const err = new Error(woBindingMsg);
     err.code = 'INVALID_PROJECT_SCOPE';
     throw err;
   }
@@ -654,8 +680,11 @@ export async function linkWorkOrderToIssue(payload, storageOverride = null, auth
   // Verify Incident Commander authorization
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: serverAccountId,
-    projectKey: OPERATIONAL_PROJECT_KEY,
-    customAuthPolicy: authContext?.customAuthPolicy
+    projectKey: bindingAuthProject(woBinding, issueKey),
+    projectId: woBinding.projectId,
+    context: authContext,
+    customAuthPolicy: authContext?.customAuthPolicy,
+    customJiraClient: authContext?.customRoleClient
   });
 
   if (!auth.isAuthorized) {

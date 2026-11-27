@@ -10,6 +10,7 @@
  */
 
 import { getDecisionForIssue } from './decisionStorage.js';
+import { projectKeyFromIssueKey, resolveTrustedProject } from './projectContext.js';
 
 export const GATE_ERROR_MESSAGES = {
   NO_DECISION_RECORD: (issueKey) => 
@@ -17,7 +18,9 @@ export const GATE_ERROR_MESSAGES = {
   INVALID_STATUS: (issueKey, status) =>
     `DELTA Gate Blocked: Linked Decision Record for ${issueKey} has status '${status}'. Only 'APPROVED' decisions permit field dispatch.`,
   MISSING_APPROVER: (issueKey) =>
-    `DELTA Gate Blocked: Decision Record for ${issueKey} lacks an authorized human Incident Commander signature. Autonomous AI dispatch is strictly prohibited.`
+    `DELTA Gate Blocked: Decision Record for ${issueKey} lacks an authorized human Incident Commander signature. Autonomous AI dispatch is strictly prohibited.`,
+  PROJECT_MISMATCH: (issueKey, decisionProject, trustedProject) =>
+    `DELTA Gate Blocked: Decision Record for ${issueKey} is bound to project '${decisionProject || trustedProject}', which does not match the trusted Forge project '${trustedProject || decisionProject}' for this issue.`
 };
 
 /**
@@ -52,6 +55,18 @@ export async function validateTransition(event, storageOverride = null, context 
   }
 
   const decision = decisionResult.data;
+
+  const issueProject = projectKeyFromIssueKey(issueKey);
+  const trusted = resolveTrustedProject(context, event);
+  if (trusted.projectKey && issueProject && trusted.projectKey !== issueProject) {
+    return { result: false, errorMessage: GATE_ERROR_MESSAGES.PROJECT_MISMATCH(issueKey, issueProject, trusted.projectKey) };
+  }
+  if (decision.projectKey && issueProject && decision.projectKey !== issueProject) {
+    return { result: false, errorMessage: GATE_ERROR_MESSAGES.PROJECT_MISMATCH(issueKey, decision.projectKey, issueProject) };
+  }
+  if (decision.linkedIssueKey && decision.linkedIssueKey !== issueKey) {
+    return { result: false, errorMessage: GATE_ERROR_MESSAGES.PROJECT_MISMATCH(issueKey, projectKeyFromIssueKey(decision.linkedIssueKey), issueProject) };
+  }
 
   // Verify decision record approval status
   if (decision.status !== 'APPROVED' && decision.status !== 'DISPATCHED') {

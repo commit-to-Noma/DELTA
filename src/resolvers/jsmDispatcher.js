@@ -20,19 +20,18 @@ import { getDecision, getStorageClient } from './decisionStorage.js';
 import { resolveDispatchLocation } from './coordinates.js';
 import {
   verifyIncidentCommanderAuthorization,
-  AUTHORIZATION_POLICY_NAME,
-  OPERATIONAL_PROJECT_KEY
+  AUTHORIZATION_POLICY_NAME
 } from './authPolicy.js';
+import { resolveProjectForRecord, assertProjectBinding } from './projectContext.js';
 
-/**
- * Server-side feature flag controlling automated Jira issue dispatch.
- * Immutable, non-exported constant hard-pinned to false for Phase 0.7.2 (KVS Smoke Test Phase).
- * 
- * In the production Forge runtime, automated Jira issue creation is permanently disabled.
- * There is NO exported variable, setter function, client payload override, environment variable,
- * or application-level mechanism to enable live dispatch.
- */
-const LIVE_DISPATCH_ENABLED = false;
+function buildIssueBrowseUrl(created) {
+  if (!created?.key) return null;
+  if (created.self && created.self.includes('/rest/api/3/issue/')) return created.self.replace(/\/rest\/api\/3\/issue\/[^/]+.*$/, `/browse/${created.key}`);
+  return created.self || null;
+}
+
+// Live dispatch is human-triggered only: createDispatchTicket is invoked from an
+// authenticated Incident Commander action and succeeds only when Jira returns a real issue.
 
 /**
  * Builds an Atlassian Document Format (ADF) document for Jira issue description.
@@ -182,16 +181,6 @@ export function buildDispatchAdfDescription(dispatchOrder, decisionRecord, resol
  * @param {object} [options] - Optional execution context { customJiraClient, storageOverride, caller, context, customAuthPolicy }
  */
 export async function createDispatchTicket(dispatchOrder, options = {}) {
-  // 0. Server-Side Killswitch Enforcement
-  // Enforced before authorization checks, KVS reads/writes, lease acquisition, reconciliation, or Jira API requests.
-  if (!LIVE_DISPATCH_ENABLED) {
-    const err = new Error(
-      'DELTA Field Dispatch is technically disabled on this deployment (Phase 0.7.2 KVS Smoke Test Mode). Automated Jira issue creation is blocked server-side.'
-    );
-    err.code = 'DISPATCH_FEATURE_DISABLED';
-    throw err;
-  }
-
   const { customJiraClient, storageOverride, caller, context, customAuthPolicy } = options;
 
   if (!dispatchOrder?.decisionId) {
@@ -211,20 +200,25 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     throw err;
   }
 
-  // Strict Project Scoping: projectKey is fixed to OPERATIONAL_PROJECT_KEY ('EMERG')
-  if (dispatchOrder.projectKey && dispatchOrder.projectKey !== OPERATIONAL_PROJECT_KEY) {
-    const err = new Error(
-      `Project scope mismatch: Field dispatch is restricted to server-configured project '${OPERATIONAL_PROJECT_KEY}' (attempted override to '${dispatchOrder.projectKey}'). Client attempts to override project key are forbidden.`
-    );
-    err.code = 'INVALID_PROJECT_SCOPE';
-    throw err;
+  const binding = resolveProjectForRecord({ context: context || options.context, authContext: context || options.context, payload: dispatchOrder });
+  if (binding.trusted) {
+    const msg = assertProjectBinding({ trustedProjectKey: binding.projectKey, candidateProjectKey: dispatchOrder.projectKey, candidateIssueKey: dispatchOrder.linkedIssueKey });
+    if (msg) { const err = new Error(msg); err.code = 'INVALID_PROJECT_SCOPE'; throw err; }
   }
-  const projectKey = OPERATIONAL_PROJECT_KEY;
+  // Peek at the decision (no side effects) so its bound project can scope auth when context is absent.
+  const peekClient = getStorageClient(storageOverride);
+  const peekDecision = await getDecision(dispatchOrder.decisionId, peekClient);
+  const projectKey = binding.projectKey || peekDecision?.data?.projectKey || peekDecision?.data?.linkedIssueKey?.split('-')[0] || dispatchOrder.projectKey;
+  if (!projectKey) { const err = new Error('Project scope violation: No trusted Forge project, linked issue, or decision project binding could be established. Fail-closed.'); err.code = 'INVALID_PROJECT_SCOPE'; throw err; }
+  if (dispatchOrder.projectKey && dispatchOrder.projectKey !== projectKey) { const err = new Error(`Project scope mismatch: Field dispatch is bound to project '${projectKey}' (attempted override to '${dispatchOrder.projectKey}').`); err.code = 'INVALID_PROJECT_SCOPE'; throw err; }
 
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: authenticatedCaller,
     projectKey,
-    customAuthPolicy
+    projectId: binding.projectId,
+    context,
+    customAuthPolicy,
+    customJiraClient: options.customRoleClient || null
   });
 
   if (!auth.isAuthorized) {
@@ -275,6 +269,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       issueKey: existingKvsDispatch.issueKey,
       issueId: existingKvsDispatch.issueId,
       self: existingKvsDispatch.self,
+      issueUrl: buildIssueBrowseUrl(existingKvsDispatch),
       decisionId: decision.decisionId,
       planId,
       operationId,
@@ -340,6 +335,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       issueKey: existingIssue.key,
       issueId: existingIssue.id,
       self: existingIssue.self,
+      issueUrl: buildIssueBrowseUrl(existingIssue),
       decisionId: decision.decisionId,
       planId,
       operationId,
@@ -366,6 +362,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       issueKey: existingIssue.key,
       issueId: existingIssue.id,
       self: existingIssue.self,
+      issueUrl: buildIssueBrowseUrl(existingIssue),
       decisionId: decision.decisionId,
       planId,
       operationId,
@@ -484,14 +481,9 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
         const created = await response.json();
         createdIssue = { key: created.key, id: created.id, self: created.self };
       } else {
-        // Offline / test simulation fallback when no customJiraClient or Forge runtime is available
-        const mockKey = `${projectKey}-${Math.floor(100 + Math.random() * 900)}`;
-        createdIssue = {
-          key: mockKey,
-          id: '10999',
-          self: `https://test.atlassian.net/rest/api/3/issue/${mockKey}`,
-          isSimulated: true
-        };
+        const err = new Error('Live dispatch requires a Forge runtime with Jira access. No Jira issue was created outside Forge.');
+        err.code = 'DISPATCH_UNAVAILABLE_OUTSIDE_FORGE';
+        throw err;
       }
     } else {
       // Injected mock client for unit testing
@@ -499,6 +491,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
         method: 'POST',
         body: issuePayload
       });
+      if (!result?.key) { const err = new Error('Jira did not return a created issue key. Dispatch cannot be confirmed.'); err.code = 'JIRA_API_FAILURE'; throw err; }
       createdIssue = { key: result.key, id: result.id, self: result.self };
     }
   } catch (jiraErr) {
@@ -539,6 +532,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     } catch (_) {
       // Ignore cleanup error
     }
+    if (jiraErr.code === 'DISPATCH_UNAVAILABLE_OUTSIDE_FORGE') throw jiraErr;
     const err = new Error(`JSM Dispatch Jira API Failure: ${jiraErr.message}`);
     err.code = 'JIRA_API_FAILURE';
     err.originalError = jiraErr;
@@ -580,6 +574,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
       issueKey: createdIssue.key,
       issueId: createdIssue.id,
       self: createdIssue.self,
+      issueUrl: buildIssueBrowseUrl(createdIssue),
       decisionId: decision.decisionId,
       planId,
       operationId,
@@ -594,6 +589,7 @@ export async function createDispatchTicket(dispatchOrder, options = {}) {
     issueKey: createdIssue.key,
     issueId: createdIssue.id,
     self: createdIssue.self,
+    issueUrl: buildIssueBrowseUrl(createdIssue),
     decisionId: decision.decisionId,
     planId,
     operationId,

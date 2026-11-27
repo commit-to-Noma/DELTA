@@ -9,7 +9,7 @@
  * 5. Rejection of linking by callers lacking Incident Commander role (UNAUTHORIZED_INCIDENT_COMMANDER).
  * 6. Rejection of linking a non-existent decision (DECISION_NOT_FOUND).
  * 7. Rejection of linking an unapproved or rejected decision (UNAPPROVED_DECISION_LINK).
- * 8. Strict project scoping enforcement (rejecting non-EMERG issue keys with INVALID_PROJECT_SCOPE).
+ * 8. Dynamic project scoping enforcement (trusted Forge project mismatch yields INVALID_PROJECT_SCOPE).
  * 9. Custom UI Bridge invocation handling for getDecisionForIssue and linkDecisionToIssue.
  * 10. Bidirectional relationship preservation (issue-decision index and decision.linkedIssueKey).
  * 11. Preserving decision record immutability, metrics, and scenario hash upon issue linkage.
@@ -170,13 +170,13 @@ describe('Phase 6: Jira Issue Panel & Linkage Verification Suite', () => {
   });
 
   // TEST 8: Strict project scoping enforcement
-  it('TEST-PANEL-08: Rejects linking to issues outside OPERATIONAL_PROJECT_KEY with INVALID_PROJECT_SCOPE', async () => {
+  it('TEST-PANEL-08: Rejects linking when issue project differs from trusted Forge project', async () => {
     await recordDecision(APPROVED_DECISION_PAYLOAD, null, COMMANDER_AUTH);
-
+    const trustedAuth = { ...COMMANDER_AUTH, context: { extension: { project: { key: 'EMERG' } } } };
     await expect(linkDecisionToIssue({
       issueKey: 'PROJ-101',
       decisionId: 'DEC-2026-0601'
-    }, null, COMMANDER_AUTH)).rejects.toThrow(/Project scope mismatch/);
+    }, null, trustedAuth)).rejects.toThrow(/Project scope mismatch/);
   });
 
   // TEST 9: Custom UI Bridge invocation handling

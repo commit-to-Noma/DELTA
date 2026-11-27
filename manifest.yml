@@ -8,10 +8,21 @@ modules:
   jira:issuePanel:
     - key: delta-decision-issue-panel
       title: DELTA Flood Mitigation Decision
-      icon: https://raw.githubusercontent.com/commit-to-Noma/DELTA/main/public/favicon.svg
+      icon: https://raw.githubusercontent.com/commit-to-Noma/DELTA/main/public/delta-logo.svg
       resource: main-ui
       resolver:
         function: rovo-action-handler
+  rovo:mcp:
+    - key: delta-hydraulic-mcp
+      name: DELTA Hydraulic MCP
+      tools:
+        - get-simulation-status
+        - evaluate-interventions
+        - get-decision-record
+        - list-decision-records
+        - query-teamwork-graph
+        - query-facility-dependencies
+
   jira:workflowValidator:
     - key: delta-decision-record-validator
       name: DELTA Decision Record Approval Gate
@@ -34,6 +45,8 @@ modules:
         - evaluate-interventions
         - get-decision-record
         - list-decision-records
+        - query-teamwork-graph
+        - query-facility-dependencies
   action:
     - key: get-simulation-status
       name: Get Simulation Status
@@ -50,11 +63,39 @@ modules:
       function: rovo-action-handler
       actionVerb: GET
       description: Retrieves an immutable, human-approved mitigation decision record by ID.
+      inputs:
+        decisionId:
+          title: Decision ID
+          type: string
+          required: true
+          description: The DELTA decision record ID to retrieve (for example DEC-2026-081)
     - key: list-decision-records
       name: List Decision Records
       function: rovo-action-handler
       actionVerb: GET
       description: Lists recent immutable hydraulic mitigation decision records.
+    - key: query-teamwork-graph
+      name: Query Teamwork Graph
+      function: rovo-action-handler
+      actionVerb: GET
+      description: Queries live Jira issues on the active project alongside Boston Longwood spatial catchment nodes.
+      inputs:
+        filterType:
+          title: Node Type Filter
+          type: string
+          required: false
+          description: Optional node type filter (HEALTHCARE_FACILITY, MUNICIPAL_DRAINAGE, DISPATCH_WORK_ORDER)
+    - key: query-facility-dependencies
+      name: Query Facility Dependencies
+      function: rovo-action-handler
+      actionVerb: GET
+      description: Returns drainage dependencies for a healthcare facility.
+      inputs:
+        facilityId:
+          title: Facility ID
+          type: string
+          required: true
+          description: Facility node ID (for example FACILITY-BWH)
   function:
     - key: rovo-action-handler
       handler: resolvers/index.handler
@@ -70,6 +111,7 @@ permissions:
     - read:jira-work
     - write:jira-work
     - storage:app
+    - write:confluence-content
 
 app:
   id: ari:cloud:ecosystem::app/7c4b604a-2340-4df7-8c0a-8fd8e44b7a12

@@ -196,99 +196,38 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
   });
 
   // -------------------------------------------------------------
-  // Part B: Server-Side Dispatch Killswitch Enforcement (Phase 0.7.2)
+  // Part B: Human-Triggered Live Dispatch (Forge/Jira only)
   // -------------------------------------------------------------
-  it('TEST-KILLSWITCH-01: [Mocked] Direct createDispatchTicket invocation is blocked when dispatch is disabled', async () => {
+  it('TEST-LIVE-01: [Mocked] Direct createDispatchTicket succeeds only when Jira returns a real created key and browse URL', async () => {
     await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-
-    let thrownError: any;
-    try {
-      await createDispatchTicket({ decisionId: 'DEC-2026-0050' }, AUTH_OPTIONS);
-    } catch (err: any) {
-      thrownError = err;
-    }
-
-    expect(thrownError).toBeDefined();
-    expect(thrownError.code).toBe('DISPATCH_FEATURE_DISABLED');
-    expect(thrownError.message).toContain('DELTA Field Dispatch is technically disabled');
-  });
-
-  it('TEST-KILLSWITCH-02: [Mocked] Exposed resolver bridge and Rovo entry points are blocked when dispatch is disabled', async () => {
-    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-
-    // 1. Custom UI bridge createDispatchTicket
-    const bridgeCall1 = {
-      call: {
-        functionKey: 'createDispatchTicket',
-        payload: { decisionId: 'DEC-2026-0050' }
-      },
-      context: COMMANDER_AUTH
-    };
-    await expect(handler(bridgeCall1, COMMANDER_AUTH)).rejects.toThrow(/DELTA Field Dispatch is technically disabled/);
-
-    // 2. Custom UI bridge dispatchFieldTeam
-    const bridgeCall2 = {
-      call: {
-        functionKey: 'dispatchFieldTeam',
-        payload: { decisionId: 'DEC-2026-0050' }
-      },
-      context: COMMANDER_AUTH
-    };
-    await expect(handler(bridgeCall2, COMMANDER_AUTH)).rejects.toThrow(/DELTA Field Dispatch is technically disabled/);
-
-    // 3. Rovo action / backend dispatch-field-team
-    const rovoCall = {
-      action: { key: 'dispatch-field-team' },
-      payload: { decisionId: 'DEC-2026-0050' }
-    };
-    await expect(handler(rovoCall, COMMANDER_AUTH)).rejects.toThrow(/DELTA Field Dispatch is technically disabled/);
-  });
-
-  it('TEST-KILLSWITCH-03: [Mocked] No KVS lease is acquired and no Jira request is made when dispatch is disabled', async () => {
-    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
-
-    let kvsSetCalled = false;
-    let jiraRequestCalled = false;
-
-    const monitoredStorage = {
-      async get(key: string) { return undefined; },
-      async set(key: string, val: any) { kvsSetCalled = true; },
-      async delete(key: string) {}
-    };
-
-    const monitoredJiraClient = {
+    const jiraClient = {
       async searchJira() { return []; },
-      async requestJira() { jiraRequestCalled = true; return {}; }
+      async requestJira() { return { id: '10001', key: 'EMERG-501', self: 'https://example.atlassian.net/rest/api/3/issue/10001' }; }
     };
-
-    let thrownErr: any;
-    try {
-      await createDispatchTicket(
-        { decisionId: 'DEC-2026-0050' },
-        { ...AUTH_OPTIONS, storageOverride: monitoredStorage, customJiraClient: monitoredJiraClient }
-      );
-    } catch (err: any) {
-      thrownErr = err;
-    }
-
-    expect(thrownErr).toBeDefined();
-    expect(thrownErr.code).toBe('DISPATCH_FEATURE_DISABLED');
-    expect(thrownErr.message).toContain('DELTA Field Dispatch is technically disabled');
-
-    // Strictly assert zero side-effects
-    expect(kvsSetCalled).toBe(false);
-    expect(jiraRequestCalled).toBe(false);
+    const result: any = await createDispatchTicket({ decisionId: 'DEC-2026-0050' }, { ...AUTH_OPTIONS, customJiraClient: jiraClient });
+    expect(result.success).toBe(true);
+    expect(result.issueKey).toBe('EMERG-501');
+    expect(result.issueUrl).toBe('https://example.atlassian.net/browse/EMERG-501');
   });
 
-  it('TEST-KILLSWITCH-04: [Mocked] Static verification that production jsmDispatcher exports zero setters and no mutable flags', () => {
-    // 1. Verify exact export surface of production resolver module
+  it('TEST-LIVE-02: [Mocked] Bridge and Rovo dispatch fail outside Forge instead of fabricating a ticket', async () => {
+    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+    const bridgeCall1 = { call: { functionKey: 'createDispatchTicket', payload: { decisionId: 'DEC-2026-0050' } }, context: COMMANDER_AUTH };
+    await expect(handler(bridgeCall1, { principal: COMMANDER_AUTH })).rejects.toThrow(/Live dispatch requires a Forge runtime/);
+    const rovoCall = { action: { key: 'dispatch-field-team' }, payload: { decisionId: 'DEC-2026-0050' } };
+    await expect(handler(rovoCall, COMMANDER_AUTH)).rejects.toThrow(/Live dispatch requires a Forge runtime/);
+  });
+
+  it('TEST-LIVE-03: [Mocked] No fabricated ticket when Jira returns no created key', async () => {
+    await recordDecision(SAMPLE_APPROVED_DECISION_BETA, null, COMMANDER_AUTH);
+    const emptyJiraClient = { async searchJira() { return []; }, async requestJira() { return {}; } };
+    await expect(createDispatchTicket({ decisionId: 'DEC-2026-0050' }, { ...AUTH_OPTIONS, customJiraClient: emptyJiraClient })).rejects.toThrow(/Jira did not return a created issue key/);
+  });
+
+  it('TEST-LIVE-04: [Mocked] Static verification that production jsmDispatcher exports no mutable dispatch flag', () => {
     const exportedKeys = Object.keys(jsmDispatcherModule).sort();
     expect(exportedKeys).toEqual(['buildDispatchAdfDescription', 'createDispatchTicket']);
-
-    // 2. Assert LIVE_DISPATCH_ENABLED is NOT exported
     expect((jsmDispatcherModule as any).LIVE_DISPATCH_ENABLED).toBeUndefined();
-
-    // 3. Assert no setter or override function exists
     expect((jsmDispatcherModule as any).__setLiveDispatchEnabledForTesting).toBeUndefined();
     expect((jsmDispatcherModule as any).setLiveDispatchEnabled).toBeUndefined();
   });
@@ -304,7 +243,7 @@ describe('Task 0.7.1.3: Hardened Authorization, Uncertainty & Provenance Suite (
     };
 
     await expect(
-      recordDecision(tamperingPayload, null, COMMANDER_AUTH)
+      recordDecision(tamperingPayload, null, { ...COMMANDER_AUTH, context: { extension: { project: { key: 'EMERG' } } } })
     ).rejects.toThrow(/Project scope mismatch/);
   });
 

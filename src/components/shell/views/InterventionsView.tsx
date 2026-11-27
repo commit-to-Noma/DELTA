@@ -100,6 +100,8 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvedRecord, setApprovedRecord] = useState<any | null>(null);
+  const [publishToConfluence, setPublishToConfluence] = useState<boolean>(false);
+  const [confluenceNotice, setConfluenceNotice] = useState<string | null>(null);
 
   const selectedPlanDef: InterventionDefinition = AUTHORITATIVE_INTERVENTIONS[selectedPlanId];
   const selectedDiff = evaluationResult?.differentials[selectedPlanId] || null;
@@ -245,6 +247,12 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
           createdAt: new Date().toISOString()
         };
         setApprovedRecord(saved);
+        if (publishToConfluence) {
+          try {
+            const pub: any = await invokeSafe('publishAuditToConfluence', { decisionId: saved.decisionId, spaceKey: 'DELTA' });
+            setConfluenceNotice(pub?.success ? `Audit page published to Confluence${pub.pageId ? ` (page ${pub.pageId})` : ''}.` : 'Confluence audit export was not completed (requires Forge Confluence access).');
+          } catch { setConfluenceNotice('Confluence audit export was not completed (requires Forge Confluence access).'); }
+        }
         registerNewDecision(saved);
         await refreshGovernanceRecords();
         setIsApprovalModalOpen(false);
@@ -722,6 +730,12 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
                 </div>
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-[11px] text-storm-300">
+              <input type="checkbox" checked={publishToConfluence} onChange={(e) => setPublishToConfluence(e.target.checked)} />
+              <span>Publish audit page to Confluence (opt-in, OFF by default)</span>
+            </label>
+            {confluenceNotice && <div className="text-[11px] text-cyan-300">{confluenceNotice}</div>}
 
             <div className="space-y-1">
               <label className="block text-storm-300 font-bold text-[11px]">

@@ -13,10 +13,7 @@
 import api, { route } from '@forge/api';
 import { getDecision, getStorageClient } from '../../src/resolvers/decisionStorage.js';
 import { resolveDispatchLocation } from '../../src/resolvers/coordinates.js';
-import {
-  verifyIncidentCommanderAuthorization,
-  OPERATIONAL_PROJECT_KEY
-} from '../../src/resolvers/authPolicy.js';
+import { verifyIncidentCommanderAuthorization } from '../../src/resolvers/authPolicy.js';
 import { buildDispatchAdfDescription } from '../../src/resolvers/jsmDispatcher.js';
 
 export async function createTestDispatchTicket(dispatchOrder: any, options: any = {}) {
@@ -39,19 +36,12 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
     throw err;
   }
 
-  // Strict Project Scoping: projectKey is fixed to OPERATIONAL_PROJECT_KEY ('EMERG')
-  if (dispatchOrder.projectKey && dispatchOrder.projectKey !== OPERATIONAL_PROJECT_KEY) {
-    const err: any = new Error(
-      `Project scope mismatch: Field dispatch is restricted to server-configured project '${OPERATIONAL_PROJECT_KEY}' (attempted override to '${dispatchOrder.projectKey}'). Client attempts to override project key are forbidden.`
-    );
-    err.code = 'INVALID_PROJECT_SCOPE';
-    throw err;
-  }
-  const projectKey = OPERATIONAL_PROJECT_KEY;
+  // Dynamic project: decision binding (set below) is authoritative; payload override checked after decision load.
+  const projectKey: string | null = null;
 
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: authenticatedCaller,
-    projectKey,
+    projectKey: dispatchOrder.projectKey || undefined,
     customAuthPolicy
   });
 
@@ -74,6 +64,11 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
   }
 
   const decision = decisionResult.data;
+  const resolvedProjectKey = (decision as any).projectKey || (decision as any).linkedIssueKey?.split('-')[0] || dispatchOrder.projectKey || 'EMERG';
+  if (dispatchOrder.projectKey && dispatchOrder.projectKey !== resolvedProjectKey) {
+    const err: any = new Error(`Project scope mismatch: Field dispatch is bound to project '${resolvedProjectKey}' (attempted override to '${dispatchOrder.projectKey}').`);
+    err.code = 'INVALID_PROJECT_SCOPE'; throw err;
+  }
 
   // 3. Approval Verification: Only APPROVED decisions may be dispatched
   if (decision.status !== 'APPROVED' && decision.status !== 'DISPATCHED') {
@@ -263,7 +258,7 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
 
   const issuePayload = {
     fields: {
-      project: { key: projectKey },
+      project: { key: resolvedProjectKey },
       summary: summary.slice(0, 250),
       issuetype: { name: issueTypeName },
       priority: { name: dispatchOrder.priority || 'High' },
@@ -303,13 +298,8 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
         const created = await response.json();
         createdIssue = { key: created.key, id: created.id, self: created.self };
       } else {
-        const mockKey = `${projectKey}-${Math.floor(100 + Math.random() * 900)}`;
-        createdIssue = {
-          key: mockKey,
-          id: '10999',
-          self: `https://test.atlassian.net/rest/api/3/issue/${mockKey}`,
-          isSimulated: true
-        };
+        const err: any = new Error('Live dispatch requires a Forge runtime with Jira access. No Jira issue was created outside Forge.');
+        err.code = 'DISPATCH_UNAVAILABLE_OUTSIDE_FORGE'; throw err;
       }
     } else {
       const result = await customJiraClient.requestJira('/rest/api/3/issue', {

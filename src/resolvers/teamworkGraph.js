@@ -9,8 +9,44 @@
  * Complies with Atlassian Teamwork Graph entity/relationship schema in preview.
  */
 
+import api, { route } from '@forge/api';
+import { resolveTrustedProject } from './projectContext.js';
+
+function hasForgeRuntime() {
+  return typeof globalThis !== 'undefined' && (typeof globalThis.__forge_fetch__ === 'function' || typeof globalThis.__forge_local_fetch__ === 'function');
+}
+
+export async function fetchLiveJiraNodes(projectKey, options = {}) {
+  if (!projectKey) return { nodes: [], edges: [], liveStatus: 'NO_PROJECT_CONTEXT' };
+  const jql = `project = "${projectKey}" ORDER BY updated DESC`;
+  let issues = [];
+  try {
+    if (typeof options.customJiraClient?.searchJira === 'function') {
+      issues = await options.customJiraClient.searchJira(jql);
+    } else if (typeof options.customJiraClient?.requestJira === 'function') {
+      const res = await options.customJiraClient.requestJira(`/rest/api/3/issue/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=key,summary,status,issuetype,labels`, { method: 'GET' });
+      issues = Array.isArray(res?.issues) ? res.issues : (Array.isArray(res) ? res : []);
+    } else if (hasForgeRuntime()) {
+      const resp = await api.asApp().requestJira(route`/rest/api/3/issue/search?jql=${jql}&maxResults=50&fields=key,summary,status,issuetype,labels`);
+      if (!resp.ok) return { nodes: [], edges: [], liveStatus: `JIRA_QUERY_FAILED_${resp.status}` };
+      issues = (await resp.json()).issues || [];
+    } else {
+      return { nodes: [], edges: [], liveStatus: 'OFFLINE_NO_FORGE_RUNTIME' };
+    }
+  } catch (e) { return { nodes: [], edges: [], liveStatus: `JIRA_QUERY_ERROR: ${e.message}` }; }
+  const nodes = issues.map(issue => {
+    const key = issue.key; const summary = issue.fields?.summary || issue.summary || '';
+    const labels = issue.fields?.labels || issue.labels || [];
+    const isWorkOrder = labels.includes('delta-dispatch') || /dispatch|work order/i.test(summary);
+    return { id: `ISSUE-${key}`, type: isWorkOrder ? 'DISPATCH_WORK_ORDER' : 'INCIDENT_ISSUE', name: `${key}: ${summary}`, metadata: { issueKey: key, status: issue.fields?.status?.name || issue.status || null, issueType: issue.fields?.issuetype?.name || null, labels, live: true } };
+  });
+  const edges = nodes.filter(n => n.type === 'DISPATCH_WORK_ORDER').map((n, i) => ({ id: `EDGE-LIVE-${i+1}`, sourceNodeId: n.id, targetNodeId: 'DRAIN-CULVERT-01', relationType: 'GOVERNS', attributes: { fieldAction: 'LIVE_JIRA_DISPATCH' } }));
+  return { nodes, edges, liveStatus: 'LIVE_JIRA' };
+}
+
 /**
- * Authoritative Teamwork Graph nodes for Longwood Medical Area & Muddy River catchment.
+ * Spatial Teamwork Graph nodes for Longwood Medical Area & Muddy River catchment.
+ * Live incident/work-order nodes are fetched from Jira (fetchLiveJiraNodes), never hard-coded.
  */
 export const AUTHORITATIVE_GRAPH_NODES = [
   // 1. Healthcare Facilities
@@ -96,27 +132,6 @@ export const AUTHORITATIVE_GRAPH_NODES = [
     }
   },
 
-  // 3. Operational Jira Incident & Dispatch Nodes
-  {
-    id: 'ISSUE-EMERG-101',
-    type: 'INCIDENT_ISSUE',
-    name: 'EMERG-101: Severe Flash Flood Warning & Longwood Medical Access Choke',
-    metadata: {
-      coordinates: { lat: 42.3385, lon: -71.1070 },
-      criticalityLevel: 'CRITICAL_P1',
-      leadAgency: 'City of Boston Emergency Operations Center (EOC)'
-    }
-  },
-  {
-    id: 'WORKORDER-JSM-4903',
-    type: 'DISPATCH_WORK_ORDER',
-    name: 'JSM-4903: Field Crew Hydro-Jetting Deployment at Brookline Culvert',
-    metadata: {
-      coordinates: { lat: 42.3412, lon: -71.1097 },
-      criticalityLevel: 'CRITICAL_P1',
-      leadAgency: 'Rapid Tactical Emergency Response Crew #01'
-    }
-  }
 ];
 
 export const AUTHORITATIVE_GRAPH_EDGES = [
@@ -149,27 +164,26 @@ export const AUTHORITATIVE_GRAPH_EDGES = [
     relationType: 'DRAINED_BY',
     attributes: { primaryCatchment: 'Longwood East Canal' }
   },
-  // Incident governing and dispatching
   {
     id: 'EDGE-05',
-    sourceNodeId: 'ISSUE-EMERG-101',
-    targetNodeId: 'FACILITY-BWH',
-    relationType: 'ACCESS_CORRIDOR_FOR',
-    attributes: { accessPriority: 'LEVEL_1_TRAUMA' }
+    sourceNodeId: 'FACILITY-DFCI',
+    targetNodeId: 'DRAIN-BASIN-02',
+    relationType: 'DRAINED_BY',
+    attributes: { primaryCatchment: 'Brookline Ave South Basin' }
   },
   {
     id: 'EDGE-06',
-    sourceNodeId: 'ISSUE-EMERG-101',
-    targetNodeId: 'WORKORDER-JSM-4903',
-    relationType: 'DISPATCHED_TO',
-    attributes: { slaMinutes: 12 }
+    sourceNodeId: 'DRAIN-CULVERT-01',
+    targetNodeId: 'DRAIN-BASIN-02',
+    relationType: 'FLOWS_TO',
+    attributes: { conveyance: 'Muddy River Retention Channel' }
   },
   {
     id: 'EDGE-07',
-    sourceNodeId: 'WORKORDER-JSM-4903',
-    targetNodeId: 'DRAIN-CULVERT-01',
-    relationType: 'GOVERNS',
-    attributes: { fieldAction: 'EMERGENCY_CULVERT_CLEARANCE' }
+    sourceNodeId: 'FACILITY-BWH',
+    targetNodeId: 'DRAIN-BASIN-02',
+    relationType: 'DRAINED_BY',
+    attributes: { primaryCatchment: 'Francis St Secondary Basin', secondary: true }
   }
 ];
 
@@ -178,23 +192,15 @@ export const AUTHORITATIVE_GRAPH_EDGES = [
  * @param {string} [filterType] - Optional node type filter
  * @returns {Promise<Object>} Graph result
  */
-export async function queryTeamworkGraph(filterType = null) {
-  const nodes = filterType 
-    ? AUTHORITATIVE_GRAPH_NODES.filter(n => n.type === filterType)
-    : AUTHORITATIVE_GRAPH_NODES;
-
+export async function queryTeamworkGraph(filterType = null, options = {}) {
+  const projectKey = options.projectKey || resolveTrustedProject(options.context).projectKey || null;
+  const live = await fetchLiveJiraNodes(projectKey, options);
+  const allNodes = [...AUTHORITATIVE_GRAPH_NODES, ...live.nodes];
+  const allEdges = [...AUTHORITATIVE_GRAPH_EDGES, ...live.edges];
+  const nodes = filterType ? allNodes.filter(n => n.type === filterType) : allNodes;
   const nodeIds = new Set(nodes.map(n => n.id));
-  const edges = AUTHORITATIVE_GRAPH_EDGES.filter(
-    e => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId)
-  );
-
-  return {
-    success: true,
-    nodes,
-    edges: filterType ? edges : AUTHORITATIVE_GRAPH_EDGES,
-    queriedAt: new Date().toISOString(),
-    sector: 'Boston Longwood Medical Area & Muddy River Basin'
-  };
+  const edges = allEdges.filter(e => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId));
+  return { success: true, nodes, edges, queriedAt: new Date().toISOString(), sector: 'Boston Longwood Medical Area & Muddy River Basin', projectKey, liveStatus: live.liveStatus };
 }
 
 /**
@@ -202,26 +208,15 @@ export async function queryTeamworkGraph(filterType = null) {
  * @param {string} facilityId - Facility ID
  * @returns {Promise<Object>} Dependencies
  */
-export async function queryFacilityDrainageDependencies(facilityId) {
+export async function queryFacilityDrainageDependencies(facilityId, options = {}) {
   const facility = AUTHORITATIVE_GRAPH_NODES.find(n => n.id === facilityId) || null;
-  if (!facility) {
-    return { success: false, facility: null, drainingNodes: [], activeDispatches: [] };
-  }
-
-  const drainageEdgeTargets = AUTHORITATIVE_GRAPH_EDGES
-    .filter(e => e.sourceNodeId === facilityId && e.relationType === 'DRAINED_BY')
-    .map(e => e.targetNodeId);
-
-  const drainingNodes = AUTHORITATIVE_GRAPH_NODES.filter(n => drainageEdgeTargets.includes(n.id));
-
-  const activeDispatches = AUTHORITATIVE_GRAPH_NODES.filter(n => 
-    n.type === 'DISPATCH_WORK_ORDER'
-  );
-
-  return {
-    success: true,
-    facility,
-    drainingNodes,
-    activeDispatches
-  };
+  if (!facility) return { success: false, facility: null, drainingNodes: [], activeDispatches: [] };
+  const drainageEdgeTargets = AUTHORITATIVE_GRAPH_EDGES.filter(e => e.sourceNodeId === facilityId && e.relationType === 'DRAINED_BY').map(e => e.targetNodeId);
+  // Prefer primary (non-secondary) drainage target when present.
+  const primary = AUTHORITATIVE_GRAPH_EDGES.filter(e => e.sourceNodeId === facilityId && e.relationType === 'DRAINED_BY' && !e.attributes?.secondary).map(e => e.targetNodeId);
+  const drainingNodes = AUTHORITATIVE_GRAPH_NODES.filter(n => (primary.length ? primary : drainageEdgeTargets).includes(n.id));
+  const projectKey = options.projectKey || resolveTrustedProject(options.context).projectKey || null;
+  const live = await fetchLiveJiraNodes(projectKey, options);
+  const activeDispatches = live.nodes.filter(n => n.type === 'DISPATCH_WORK_ORDER');
+  return { success: true, facility, drainingNodes, activeDispatches, liveStatus: live.liveStatus };
 }
