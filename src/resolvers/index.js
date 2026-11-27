@@ -143,7 +143,32 @@ export async function saveSimulationRun(summary, storageOverride = null, authCon
   };
 
   await client.set(SIMULATION_RUN_KEY, record);
+  console.info('[DELTA] saveSimulationRun', { status: 'COMPLETED_RUN', stormId: record.stormId });
   return { success: true, data: record };
+}
+
+export function normalizeSimulationSnapshot(snapshot = {}) {
+  const stormId = String(snapshot.profileId || snapshot.stormId || 'simulation-snapshot')
+    .replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 64);
+  const currentStorageM3 = Number(snapshot.currentStorageM3 ?? snapshot.totalWaterVolumeM3 ?? 0) || 0;
+  return {
+    sector: 'Boston Longwood Medical Area & Muddy River Catchment',
+    stormId,
+    stormLabel: `Simulation snapshot (${stormId})`,
+    elapsedSimulationSeconds: Number(snapshot.elapsedSeconds ?? snapshot.elapsedSimulationSeconds ?? 0) || 0,
+    totalWaterVolumeM3: currentStorageM3,
+    currentStorageM3,
+    maxWaterDepthM: Number(snapshot.peakDepthM ?? snapshot.maxWaterDepthM ?? 0) || 0,
+    impassableRoadsCount: Number(snapshot.impassableRoadsCount ?? 0) || 0,
+    atRiskFacilities: Array.isArray(snapshot.atRiskFacilities) ? snapshot.atRiskFacilities : [],
+    activeDisruptionIds: Array.isArray(snapshot.activeDisruptionIds) ? snapshot.activeDisruptionIds : [],
+    snapshotTimestamp: snapshot.timestamp || null,
+    source: 'saveSimulationSnapshot'
+  };
+}
+
+export async function saveSimulationSnapshot(snapshot, storageOverride = null, authContext = null) {
+  return await saveSimulationRun(normalizeSimulationSnapshot(snapshot || {}), storageOverride, authContext);
 }
 
 /**
@@ -289,13 +314,16 @@ resolver.define('get-simulation-status', async () => await getSimulationStatus()
 resolver.define('evaluateInterventions', async () => await evaluateInterventions());
 resolver.define('evaluate-interventions', async () => await evaluateInterventions());
 resolver.define('saveSimulationRun', async (req) => await saveSimulationRun(req?.payload || req, null, req?.context));
+resolver.define('saveSimulationSnapshot', async (req) => await saveSimulationSnapshot(req?.payload || req, null, req?.context));
 resolver.define('saveInterventionsEvaluation', async (req) => await saveInterventionsEvaluation(req?.payload || req, null, req?.context));
 
 // Decision Record KVS operations (Custom UI Bridge)
 resolver.define('recordDecision', async (req) => {
   try {
     const payload = req?.payload || req;
-    return await recordDecision(payload, null, req?.context);
+    const result = await recordDecision(payload, null, req?.context);
+    console.info('[DELTA] recordDecision', { projectKey: result?.data?.projectKey || null, status: result?.data?.status || null, success: result?.success === true });
+    return result;
   } catch (err) {
     return {
       success: false,
@@ -387,10 +415,12 @@ resolver.define('linkWorkOrderToIssue', async (req) => {
 // JSM Field Dispatch Ticket Creation (Custom UI Bridge)
 resolver.define('createDispatchTicket', async (req) => {
   const payload = req?.payload || req;
-  return await createDispatchTicket(payload, {
+  const result = await createDispatchTicket(payload, {
     caller: req?.context?.accountId || req?.context?.principal?.accountId,
     context: req?.context
   });
+  console.info('[DELTA] createDispatchTicket', { projectKey: result?.projectKey || null, status: result?.status || null, issueKey: result?.issueKey || null });
+  return result;
 });
 
 resolver.define('dispatchFieldTeam', async (req) => {
@@ -402,9 +432,17 @@ resolver.define('dispatchFieldTeam', async (req) => {
 });
 
 // Teamwork Graph Query operations (Custom UI Bridge & Backend)
-resolver.define('queryTeamworkGraph', async (req) => await queryTeamworkGraph(req?.payload?.filterType || req?.filterType, { context: req?.context }));
+resolver.define('queryTeamworkGraph', async (req) => {
+  const result = await queryTeamworkGraph(req?.payload?.filterType || req?.filterType, { context: req?.context });
+  console.info('[DELTA] queryTeamworkGraph', { projectKey: result?.projectKey || null, liveStatus: result?.liveStatus || null, nodeCount: result?.nodes?.length ?? 0 });
+  return result;
+});
 resolver.define('queryFacilityDrainageDependencies', async (req) => await queryFacilityDrainageDependencies(req?.payload?.facilityId || req?.facilityId, { context: req?.context }));
-resolver.define('publishAuditToConfluence', async (req) => await publishAuditToConfluence(req?.payload || req, { context: req?.context }));
+resolver.define('publishAuditToConfluence', async (req) => {
+  const result = await publishAuditToConfluence(req?.payload || req, { context: req?.context });
+  console.info('[DELTA] publishAuditToConfluence', { spaceKey: result?.spaceKey || null, success: result?.success === true, pageId: result?.pageId || null });
+  return result;
+});
 
 const customUiHandler = resolver.getDefinitions();
 
@@ -435,6 +473,10 @@ export async function handler(event, context) {
     case 'save-simulation-run':
     case 'saveSimulationRun':
       return await saveSimulationRun(payload, null, context);
+
+    case 'save-simulation-snapshot':
+    case 'saveSimulationSnapshot':
+      return await saveSimulationSnapshot(payload, null, context);
 
     case 'get-decision-record':
     case 'getDecisionRecord':

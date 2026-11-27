@@ -29,6 +29,7 @@ import { InterventionsView } from './views/InterventionsView';
 import { DecisionBriefingView } from './views/DecisionBriefingView';
 import { OperationalTicketsView } from './views/OperationalTicketsView';
 import { IssuePanel } from '../jira/IssuePanel';
+import { LiveContextStatus } from './LiveContextStatus';
 
 export type ShellTab = WorkspaceStage;
 
@@ -145,6 +146,7 @@ const AppShellInner: React.FC<AppShellProps> = ({ onExitToLanding }) => {
 
         {/* Right Controls & Governance Status */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          <LiveContextStatus />
           {/* Scenario Hash / Solver Status */}
           <div className="hidden lg:flex items-center gap-1.5 px-2 py-1 rounded bg-onyx-950 border border-onyx-800 text-[10px] font-mono text-storm-400">
             {isComputingEvaluation ? (

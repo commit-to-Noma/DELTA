@@ -10,8 +10,12 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import {
   saveSimulationRun,
+  saveSimulationSnapshot,
+  normalizeSimulationSnapshot,
   getSimulationStatus,
   saveInterventionsEvaluation,
   evaluateInterventions,
@@ -93,6 +97,34 @@ describe('Task 0.7.3.1 Architectural Remediation Suite', () => {
       expect(res.success).toBe(true);
       expect(res.data.savedByAccountId).toBe('qm:regular-project-engineer');
       expect(res.data.savedAt).toBeDefined();
+    });
+  });
+
+  describe('1b. saveSimulationSnapshot (UI invoke key)', () => {
+    it('persists a UI snapshot payload and makes it readable via getSimulationStatus', async () => {
+      const res = await saveSimulationSnapshot({
+        profileId: 'reference-noaa-50yr', activeDisruptionIds: ['disruption-brookline-culvert'],
+        elapsedSeconds: 7200, peakDepthM: 0.42, currentStorageM3: 51000, timestamp: new Date().toISOString()
+      }, null, VALID_USER_AUTH);
+      expect(res.success).toBe(true);
+      expect(res.data.stormId).toBe('reference-noaa-50yr');
+      expect(res.data.maxWaterDepthM).toBe(0.42);
+      const status = await getSimulationStatus();
+      expect(status.status).toBe('COMPLETED_RUN');
+      expect(status.data.maxWaterDepthM).toBe(0.42);
+    });
+
+    it('normalizes unsafe profile ids into a valid stormId', () => {
+      expect(normalizeSimulationSnapshot({ profileId: 'a/b c', peakDepthM: 1 }).stormId).toBe('a-b-c');
+    });
+
+    it('every invoke key used by the UI is defined in the resolver', () => {
+      const uiFiles = ['src/context/IncidentWorkspaceContext.tsx','src/components/shell/views/DecisionRecordsView.tsx','src/components/shell/views/OperationalTicketsView.tsx','src/components/shell/views/InterventionsView.tsx','src/components/shell/views/FloodSimulationView.tsx','src/components/jira/IssuePanel.tsx'];
+      const keys = new Set<string>();
+      for (const f of uiFiles) { const src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8'); for (const m of src.matchAll(/invoke(?:Safe)?\(\s*'([^']+)'/g)) keys.add(m[1]); }
+      const resolverSrc = fs.readFileSync(path.resolve(__dirname, '../src/resolvers/index.js'), 'utf8');
+      const defined = new Set([...resolverSrc.matchAll(/resolver\.define\('([^']+)'/g)].map((m: any) => m[1]));
+      expect([...keys].filter(k => !defined.has(k))).toEqual([]);
     });
   });
 

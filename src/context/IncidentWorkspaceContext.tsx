@@ -25,20 +25,19 @@ import React, {
   useMemo,
   useEffect,
   useCallback,
-  useRef,
-  useTransition
+  useRef
 } from 'react';
 import { BostonCatchmentDataset, loadBostonCatchment } from '../data/catchmentLoader';
 import {
   AUTHORITATIVE_STRESS_PROFILES,
-  executeMultiScenarioEvaluation,
+  executeMultiScenarioEvaluationAsync,
   MultiScenarioEvaluationResult,
   StressProfile
 } from '../simulation/interventionEngine';
 import {
   AUTHORITATIVE_DISRUPTIONS,
   DisruptionScenario,
-  executeSpatialDisruptionComparison,
+  executeSpatialDisruptionComparisonAsync,
   SpatialDisruptionComparisonResult
 } from '../simulation/disruptionEngine';
 import { computeScenarioHash } from '../simulation/decisionBriefingEngine';
@@ -214,7 +213,6 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
 
   const [currentDisruptionEntry, setCurrentDisruptionEntry] = useState<CachedDisruptionEntry | null>(null);
   const [isComputingDisruption, setIsComputingDisruption] = useState<boolean>(false);
-  const [, startTransition] = useTransition();
 
   // 4. Governance & Operational Records
   const [decisions, setDecisions] = useState<any[]>([]);
@@ -293,47 +291,44 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
         AUTHORITATIVE_STRESS_PROFILES[activeProfileId] || AUTHORITATIVE_STRESS_PROFILES['reference-noaa-50yr'];
       const disruptionIdsCopy = [...activeDisruptionIds];
 
-      const timer = setTimeout(() => {
-        startTransition(() => {
-          try {
-            // Use dtMacro=60s for 6-hour profile (360 steps) and dtMacro=20s for <=1hr profiles
-            // Keeps exact hydraulic solver equations and full storm duration while staying responsive
-            const dtMacro = profile.durationSeconds > 7200 ? 60.0 : 20.0;
-            const result = executeMultiScenarioEvaluation(
-              dataset,
-              profile,
-              profile.rainfallIntensityMmPerHour ?? profile.totalRainfallMm / profile.durationHours,
-              dtMacro,
-              disruptionIdsCopy
-            );
-            const hash = computeScenarioHash(result);
-            const entry: CachedEvaluationEntry = {
-              configKey: targetKey,
-              scenarioHash: hash,
-              result
-            };
-            evaluationCacheRef.current.set(targetKey, entry);
-            setCurrentEvaluationEntry(entry);
-          } catch (err: any) {
-            setEvaluationError(err?.message || 'Hydraulic evaluation failed');
-          } finally {
-            setIsComputingEvaluation(false);
-          }
-        });
-      }, 25);
+      let cancelled = false;
+      // Chunked async solver: yields between step batches so the Forge iframe main thread stays responsive.
+      (async () => {
+        try {
+          const dtMacro = profile.durationSeconds > 7200 ? 60.0 : 20.0;
+          const result = await executeMultiScenarioEvaluationAsync(
+            dataset,
+            profile,
+            profile.rainfallIntensityMmPerHour ?? profile.totalRainfallMm / profile.durationHours,
+            dtMacro,
+            disruptionIdsCopy
+          );
+          if (cancelled) return;
+          const hash = computeScenarioHash(result);
+          const entry: CachedEvaluationEntry = { configKey: targetKey, scenarioHash: hash, result };
+          evaluationCacheRef.current.set(targetKey, entry);
+          setCurrentEvaluationEntry(entry);
+        } catch (err: any) {
+          if (!cancelled) setEvaluationError(err?.message || 'Hydraulic evaluation failed');
+        } finally {
+          if (!cancelled) setIsComputingEvaluation(false);
+        }
+      })();
 
-      return () => clearTimeout(timer);
+      return () => { cancelled = true; };
     },
     [activeProfileId, activeDisruptionIds, dataset]
   );
 
-  // Automatically compute/synchronize evaluation whenever active profile or disruptions change
+  // Compute evaluation lazily on stages that need it — never eagerly on initial load,
+  // so the Forge project page renders immediately inside its iframe.
   useEffect(() => {
+    if (!['interventions', 'briefing', 'operations'].includes(activeStage)) return;
     const cleanup = runEvaluationForActiveConfig(false);
     return () => {
       if (cleanup) cleanup();
     };
-  }, [runEvaluationForActiveConfig]);
+  }, [runEvaluationForActiveConfig, activeStage]);
 
   // Compute spatial disruption comparison (Nominal vs Disrupted) strictly under active profile + disruptions
   const ensureDisruptionComparison = useCallback(() => {
@@ -352,27 +347,22 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
       AUTHORITATIVE_STRESS_PROFILES[activeProfileId] || AUTHORITATIVE_STRESS_PROFILES['reference-noaa-50yr'];
     const disruptionIdsCopy = [...activeDisruptionIds];
 
-    setTimeout(() => {
-      startTransition(() => {
-        try {
-          const dtMacro = profile.durationSeconds > 7200 ? 60.0 : 20.0;
-          const result = executeSpatialDisruptionComparison(
-            dataset,
-            disruptionIdsCopy,
-            profile,
-            dtMacro
-          );
-          const entry: CachedDisruptionEntry = {
-            configKey: targetKey,
-            result
-          };
-          disruptionCacheRef.current.set(targetKey, entry);
-          setCurrentDisruptionEntry(entry);
-        } finally {
-          setIsComputingDisruption(false);
-        }
-      });
-    }, 25);
+    (async () => {
+      try {
+        const dtMacro = profile.durationSeconds > 7200 ? 60.0 : 20.0;
+        const result = await executeSpatialDisruptionComparisonAsync(
+          dataset,
+          disruptionIdsCopy,
+          profile,
+          dtMacro
+        );
+        const entry: CachedDisruptionEntry = { configKey: targetKey, result };
+        disruptionCacheRef.current.set(targetKey, entry);
+        setCurrentDisruptionEntry(entry);
+      } finally {
+        setIsComputingDisruption(false);
+      }
+    })();
   }, [activeProfileId, activeDisruptionIds, dataset]);
 
   // Keep disruption comparison synchronized when user is viewing Simulation & Disruption

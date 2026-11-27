@@ -78,7 +78,7 @@ export async function invokeSafe(functionKey: string, payload?: any): Promise<an
     return { success: false, error: { code: 'CONFLUENCE_UNAVAILABLE_OUTSIDE_FORGE', message: 'Confluence audit export requires a Forge runtime. No page was created outside Forge.' } };
   }
 
-  if (functionKey === 'saveSimulationRun') {
+  if (functionKey === 'saveSimulationRun' || functionKey === 'saveSimulationSnapshot') {
     return { success: true, status: 'COMPLETED_RUN', message: 'Saved in local session' };
   }
 

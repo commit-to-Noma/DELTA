@@ -366,14 +366,14 @@ export function getRainfallRateAtElapsed(profile: StressProfile, elapsedSeconds:
  * Records discrete time-to-threshold crossings at exact macro-step intervals (dtMacro)
  * without sub-step interpolation.
  */
-function runSingleScenario(
+function* runSingleScenarioSteps(
   dataset: BostonCatchmentDataset,
   config: HydraulicGridConfig,
   scenarioId: string,
   scenarioName: string,
   profile: StressProfile,
   dtMacro: number = 20.0
-): ScenarioRunMetrics {
+): Generator<void, ScenarioRunMetrics, void> {
   const { nx } = dataset.metadata.grid;
   let state = createHydraulicState(config);
   const numSteps = Math.max(1, Math.floor(profile.durationSeconds / dtMacro));
@@ -442,6 +442,7 @@ function runSingleScenario(
       if (hospFirst15[hIdx] === null && maxD >= 0.15) hospFirst15[hIdx] = elapsedAfterStep;
       if (hospFirst30[hIdx] === null && maxD >= 0.30) hospFirst30[hIdx] = elapsedAfterStep;
     }
+    if (s % 20 === 19) yield;
   }
 
   // Max depth across domain
@@ -930,13 +931,13 @@ export function generateEvidenceBasedFindings(
  * Executes Multi-Scenario Intervention Evaluation across an authoritative or custom stress profile.
  * Runs Baseline and all 3 Plans from an invariant, independent clone of the initial state.
  */
-export function executeMultiScenarioEvaluation(
+export function* executeMultiScenarioEvaluationSteps(
   dataset: BostonCatchmentDataset,
   simulatedSecondsOrProfile: number | StressProfile | string = 3600,
   rainfallRateMmPerHour: number = 35.0,
   dtMacro: number = 20.0,
   activeDisruptionIds: string[] = ['disruption-brookline-culvert']
-): MultiScenarioEvaluationResult {
+): Generator<void, MultiScenarioEvaluationResult, void> {
   const { nx } = dataset.metadata.grid;
 
   // Resolve stress profile
@@ -1001,7 +1002,7 @@ export function executeMultiScenarioEvaluation(
       ? 'Baseline: Unmitigated Nominal Drainage'
       : `Baseline: Unmitigated (${activeDisruptions.map((d) => d.targetInletId).join(', ')} Impaired)`;
 
-  const baseline = runSingleScenario(
+  const baseline = yield* runSingleScenarioSteps(
     dataset,
     baseDisruptedConfig,
     'baseline-emergency',
@@ -1025,7 +1026,7 @@ export function executeMultiScenarioEvaluation(
     }
   }
 
-  const planAlpha = runSingleScenario(
+  const planAlpha = yield* runSingleScenarioSteps(
     dataset,
     alphaConfig,
     'plan-alpha',
@@ -1057,7 +1058,7 @@ export function executeMultiScenarioEvaluation(
     drainageInlets: betaInlets
   };
 
-  const planBeta = runSingleScenario(
+  const planBeta = yield* runSingleScenarioSteps(
     dataset,
     betaConfig,
     'plan-beta',
@@ -1089,7 +1090,7 @@ export function executeMultiScenarioEvaluation(
     drainageInlets: gammaInlets
   };
 
-  const planGamma = runSingleScenario(
+  const planGamma = yield* runSingleScenarioSteps(
     dataset,
     gammaConfig,
     'plan-gamma',
@@ -1154,4 +1155,34 @@ export function executeMultiScenarioEvaluation(
       disclosures: profile.disclosures
     }
   };
+}
+
+export function executeMultiScenarioEvaluation(
+  dataset: BostonCatchmentDataset,
+  simulatedSecondsOrProfile: number | StressProfile | string = 3600,
+  rainfallRateMmPerHour: number = 35.0,
+  dtMacro: number = 20.0,
+  activeDisruptionIds: string[] = ['disruption-brookline-culvert']
+): MultiScenarioEvaluationResult {
+  const gen = executeMultiScenarioEvaluationSteps(dataset, simulatedSecondsOrProfile, rainfallRateMmPerHour, dtMacro, activeDisruptionIds);
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
+}
+
+/** Chunked variant: yields to the event loop between solver step batches so Forge iframes stay responsive. */
+export async function executeMultiScenarioEvaluationAsync(
+  dataset: BostonCatchmentDataset,
+  simulatedSecondsOrProfile: number | StressProfile | string = 3600,
+  rainfallRateMmPerHour: number = 35.0,
+  dtMacro: number = 20.0,
+  activeDisruptionIds: string[] = ['disruption-brookline-culvert']
+): Promise<MultiScenarioEvaluationResult> {
+  const gen = executeMultiScenarioEvaluationSteps(dataset, simulatedSecondsOrProfile, rainfallRateMmPerHour, dtMacro, activeDisruptionIds);
+  let step = gen.next();
+  while (!step.done) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    step = gen.next();
+  }
+  return step.value;
 }

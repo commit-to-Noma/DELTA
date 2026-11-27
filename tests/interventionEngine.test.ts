@@ -19,11 +19,21 @@ import { describe, it, expect } from 'vitest';
 import { loadBostonCatchment } from '../src/data/catchmentLoader';
 import {
   AUTHORITATIVE_INTERVENTIONS,
-  executeMultiScenarioEvaluation
+  executeMultiScenarioEvaluation,
+  executeMultiScenarioEvaluationAsync
 } from '../src/simulation/interventionEngine';
 
 describe('Phase 3: Multi-Scenario Intervention Planner Suite', () => {
   const dataset = loadBostonCatchment();
+
+  it('chunked async evaluation matches synchronous evaluation exactly', async () => {
+    const sync = executeMultiScenarioEvaluation(dataset, 300, 30.0);
+    const asyncRes = await executeMultiScenarioEvaluationAsync(dataset, 300, 30.0);
+    expect(asyncRes.baseline.maxWaterDepthM).toBe(sync.baseline.maxWaterDepthM);
+    expect(asyncRes.planGamma.maxWaterDepthM).toBe(sync.planGamma.maxWaterDepthM);
+    expect(asyncRes.ranking.recommendedPlanId).toBe(sync.ranking.recommendedPlanId);
+    expect(Array.from(asyncRes.baseline.waterDepth)).toEqual(Array.from(sync.baseline.waterDepth));
+  });
 
   it('TEST-INTV-01: Verifies physical configurations and parameter definitions for all 3 plans', () => {
     const alpha = AUTHORITATIVE_INTERVENTIONS['plan-alpha'];
