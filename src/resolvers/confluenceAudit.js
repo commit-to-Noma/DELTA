@@ -26,12 +26,16 @@ async function listSpaces(options) {
   return null;
 }
 
-async function createPage(body, options) {
+async function createPage(body, options, resolvedSpace) {
   const client = options.customConfluenceClient;
   if (typeof client?.requestConfluence === 'function') return await client.requestConfluence('/wiki/rest/api/content', { method: 'POST', body });
   if (typeof client?.createPage === 'function') return await client.createPage(body);
   if (hasForgeRuntime()) {
-    const resp = await api.asApp().requestConfluence(route`/wiki/rest/api/content`, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    // /wiki/rest/api/content was removed by Atlassian (HTTP 410 Gone); v2 pages API requires the numeric spaceId.
+    const spaceId = resolvedSpace?.id ?? resolvedSpace?.spaceId;
+    if (!spaceId) { const e = new Error('Could not resolve a Confluence space ID for audit export: no Confluence space was found on this site.'); e.code = 'CONFLUENCE_NO_SPACE_AVAILABLE'; throw e; }
+    const v2Body = { spaceId: String(spaceId), status: 'current', title: body.title, body: { representation: 'storage', value: body.body.storage.value } };
+    const resp = await api.asApp().requestConfluence(route`/wiki/api/v2/pages`, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(v2Body) });
     if (!resp.ok) { const e = new Error(`Confluence API failed with HTTP ${resp.status}: ${await resp.text()}`); e.code = 'CONFLUENCE_API_FAILURE'; throw e; }
     return await resp.json();
   }
@@ -49,14 +53,14 @@ export async function publishAuditToConfluence(payload = {}, options = {}) {
   const decision = decisionResult.data;
 
   let resolvedSpaceKey = typeof payload.spaceKey === 'string' && payload.spaceKey.trim() ? payload.spaceKey.trim() : null;
+  let resolvedSpace = null;
   let spaceDiscovered = false;
   let spaces = null;
   try { spaces = await listSpaces(options); } catch { spaces = null; }
   if (Array.isArray(spaces) && spaces.length > 0) {
-    if (!resolvedSpaceKey || !spaces.some(s => spaceKeyOf(s) === resolvedSpaceKey)) {
-      resolvedSpaceKey = spaceKeyOf(spaces[0]);
-      spaceDiscovered = true;
-    }
+    resolvedSpace = spaces.find(s => spaceKeyOf(s) === resolvedSpaceKey) || spaces[0];
+    if (!resolvedSpaceKey || spaceKeyOf(resolvedSpace) !== resolvedSpaceKey) spaceDiscovered = true;
+    resolvedSpaceKey = spaceKeyOf(resolvedSpace);
   }
   if (!resolvedSpaceKey) {
     const e = new Error('No Confluence space available for audit export: provide a space key in the approval form, or create a Confluence space on this site first.'); e.code = 'CONFLUENCE_NO_SPACE_AVAILABLE'; throw e;
@@ -65,18 +69,21 @@ export async function publishAuditToConfluence(payload = {}, options = {}) {
   const makeBody = (key) => ({ type: 'page', title: `DELTA Decision Audit ${decision.decisionId}`, space: { key }, body: { storage: { value: buildAuditStorageHtml(decision), representation: 'storage' } } });
   let result;
   try {
-    result = await createPage(makeBody(resolvedSpaceKey), options);
+    result = await createPage(makeBody(resolvedSpaceKey), options, resolvedSpace);
   } catch (err) {
     // Provided/default key may not exist on this site (e.g. DELTA): discover and retry once.
     if (!spaceDiscovered && /404|space/i.test(err.message || '')) {
       let discovered = null;
       try { discovered = await listSpaces(options); } catch { discovered = null; }
-      const fallbackKey = Array.isArray(discovered) && discovered.length ? spaceKeyOf(discovered[0]) : null;
+      const fallback = Array.isArray(discovered) && discovered.length ? discovered[0] : null;
+      const fallbackKey = spaceKeyOf(fallback);
       if (!fallbackKey || fallbackKey === resolvedSpaceKey) throw err;
-      result = await createPage(makeBody(fallbackKey), options);
-      resolvedSpaceKey = fallbackKey; spaceDiscovered = true;
+      result = await createPage(makeBody(fallbackKey), options, fallback);
+      resolvedSpaceKey = fallbackKey; resolvedSpace = fallback; spaceDiscovered = true;
     } else throw err;
   }
   if (!result?.id) { const e = new Error('Confluence did not return a created page id. Export cannot be confirmed.'); e.code = 'CONFLUENCE_API_FAILURE'; throw e; }
-  return { success: true, pageId: result.id, pageUrl: result._links?.webui || null, links: result._links || null, decisionId, spaceKey: resolvedSpaceKey, spaceDiscovered };
+  let pageUrl = result._links?.webui || null;
+  if (pageUrl && pageUrl.startsWith('/') && !pageUrl.startsWith('/wiki/')) pageUrl = `/wiki${pageUrl}`;
+  return { success: true, pageId: result.id, pageUrl, links: result._links || null, decisionId, spaceKey: resolvedSpaceKey, spaceDiscovered };
 }
