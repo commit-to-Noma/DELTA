@@ -49,12 +49,22 @@ export const OperationalTicketsView: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [dispatchedLinks, setDispatchedLinks] = useState<Record<string, { issueKey: string; issueUrl?: string }>>({});
   const handleDispatchLive = async (wo: OperationalWorkOrder) => {
+    setActionNotice(`Dispatching live Jira issue for ${wo.workOrderId}…`);
     try {
       const res: any = await invokeSafe('createDispatchTicket', { decisionId: wo.decisionId });
-      if (res?.success && res.issueKey) { setDispatchedLinks(prev => ({ ...prev, [wo.workOrderId]: { issueKey: res.issueKey, issueUrl: res.issueUrl || res.self } })); setActionNotice(`Live Jira issue ${res.issueKey} created for ${wo.workOrderId}.`); }
-      else setActionNotice(res?.error?.message || res?.message || 'Live dispatch requires Forge Jira access; no ticket was created.');
+      if (res?.success && res.issueKey) {
+        setDispatchedLinks(prev => ({ ...prev, [wo.workOrderId]: { issueKey: res.issueKey, issueUrl: res.issueUrl || res.self } }));
+        setActionNotice(`Live Jira issue ${res.issueKey} created for ${wo.workOrderId}.`);
+        setTimeout(() => setActionNotice(null), 12000);
+      } else {
+        const raw = res?.error?.message || res?.message || '';
+        setActionNotice(
+          /not found/i.test(raw)
+            ? 'No approved decision on the server yet — go to Step 03 Interventions → "Approve Decision", then dispatch again. (Nothing was created.)'
+            : raw || 'Live dispatch requires Forge Jira access; no ticket was created.'
+        );
+      }
     } catch (e: any) { setActionNotice(e?.message || 'Live dispatch failed; no ticket confirmed.'); }
-    setTimeout(() => setActionNotice(null), 8000);
   };
 
   // Load stored work orders on mount
