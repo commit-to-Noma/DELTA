@@ -458,8 +458,21 @@ export async function handler(event, context) {
   }
 
   // Case B: Rovo Action or direct backend call
-  const actionKey = event?.action?.key || event?.actionKey || event?.key || 'unknown';
-  const payload = event?.payload || {};
+  const actionKey = event?.action?.key || event?.actionKey || event?.key ||
+    event?.payload?.actionKey || event?.payload?.action?.key || event?.payload?.key ||
+    context?.moduleKey || event?.context?.moduleKey || event?.moduleKey || 'unknown';
+  console.info('[DELTA] handler', {
+    actionKey,
+    eventKeys: Object.keys(event || {}),
+    payloadKeys: Object.keys(event?.payload || {}),
+    contextKeys: Object.keys(event?.context || {}),
+    ctxPayloadKeys: Object.keys(event?.context?.payload || event?.context?.inputs || {}),
+    moduleKey: context?.moduleKey || event?.context?.moduleKey || null
+  });
+  // Forge Rovo/MCP inputs arrive as top-level event fields (e.g. event.decisionId), not under payload.
+  const { context: _ctx, orgId: _orgId, contextToken: _token, call: _call, action: _action, ...eventInputs } = event || {};
+  const payload = { ...eventInputs, ...(event?.payload?.inputs || event?.payload || {}) };
+  const effectiveContext = context || event?.context || null;
 
   switch (actionKey) {
     case 'get-simulation-status':
@@ -472,11 +485,11 @@ export async function handler(event, context) {
 
     case 'save-simulation-run':
     case 'saveSimulationRun':
-      return await saveSimulationRun(payload, null, context);
+      return await saveSimulationRun(payload, null, effectiveContext);
 
     case 'save-simulation-snapshot':
     case 'saveSimulationSnapshot':
-      return await saveSimulationSnapshot(payload, null, context);
+      return await saveSimulationSnapshot(payload, null, effectiveContext);
 
     case 'get-decision-record':
     case 'getDecisionRecord':
@@ -489,26 +502,26 @@ export async function handler(event, context) {
 
     case 'record-decision':
     case 'recordDecision':
-      return await recordDecision(payload, null, context);
+      return await recordDecision(payload, null, effectiveContext);
 
     case 'dispatch-field-team':
     case 'createDispatchTicket':
       return await createDispatchTicket(payload, {
-        caller: context?.accountId || context?.principal?.accountId,
-        context
+        caller: effectiveContext?.accountId || effectiveContext?.principal?.accountId,
+        context: effectiveContext
       });
 
     case 'query-teamwork-graph':
     case 'queryTeamworkGraph':
-      return await queryTeamworkGraph(payload.filterType, { context });
+      return await queryTeamworkGraph(payload.filterType, { context: effectiveContext });
 
     case 'query-facility-dependencies':
     case 'queryFacilityDrainageDependencies':
-      return await queryFacilityDrainageDependencies(payload.facilityId, { context });
+      return await queryFacilityDrainageDependencies(payload.facilityId, { context: effectiveContext });
 
     case 'publish-audit-to-confluence':
     case 'publishAuditToConfluence':
-      return await publishAuditToConfluence(payload, { context });
+      return await publishAuditToConfluence(payload, { context: effectiveContext });
 
     default:
       return {

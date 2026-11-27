@@ -142,6 +142,19 @@ describe('Forge Resolver & Rovo Action Handler Suite', () => {
     expect(res.error.supportedActions).toContain('get-simulation-status');
   });
 
+  it('TEST-RES-05b: Resolves the real Forge Rovo event shape (context.moduleKey, no action field)', async () => {
+    // Live-captured shape: event = { context: { moduleKey }, orgId, contextToken }
+    const res = await handler({ context: { moduleKey: 'get-simulation-status' }, orgId: 'org-1', contextToken: 'x' }, {});
+    expect(res.success).toBe(true);
+    expect(res.status).toBe('NO_RUN');
+  });
+
+  it('TEST-RES-05c: Reads Rovo inputs from top-level event fields (event.decisionId)', async () => {
+    const res = await handler({ decisionId: 'DEC-DOES-NOT-EXIST', context: { moduleKey: 'get-decision-record' } }, {});
+    expect(res.success).toBe(false);
+    expect(res.error.code).not.toBe('UNRECOGNIZED_ACTION');
+  });
+
   it('TEST-RES-06: Confirms no API keys, tokens, or credentials exposed in payloads', async () => {
     const statusRes = await handler({ action: { key: 'get-simulation-status' } }, {});
     const evalRes = await handler({ action: { key: 'evaluate-interventions' } }, {});
