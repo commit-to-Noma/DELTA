@@ -221,7 +221,14 @@ export async function recordDecision(payload, storageOverride = null, authContex
 
   // 3. Server-generated decisionId if omitted by client
   const decisionId = payload?.decisionId || `DEC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-  const payloadToValidate = payload?.decisionId ? payload : { ...payload, decisionId };
+  let payloadToValidate = payload?.decisionId ? payload : { ...payload, decisionId };
+  // The Custom UI does not (and should not) replicate the server's canonical
+  // SHA-256; when it omits scenarioHash but supplies canonicalScenario, derive
+  // the authoritative hash server-side. An explicitly empty/spoofed hash is
+  // still rejected by validateDecisionPayload below.
+  if ((payload?.scenarioHash === undefined || payload?.scenarioHash === null) && payload?.canonicalScenario) {
+    payloadToValidate = { ...payloadToValidate, scenarioHash: computeCanonicalScenarioHash(payload.canonicalScenario).scenarioHash };
+  }
 
   // 4. Schema & Canonical Scenario Validation
   validateDecisionPayload(payloadToValidate);
@@ -274,7 +281,11 @@ export async function recordDecision(payload, storageOverride = null, authContex
   let authoritativeHash = payload.scenarioHash;
   if (canonicalScenario) {
     const canonicalRes = computeCanonicalScenarioHash(canonicalScenario);
-    canonicalScenario = canonicalRes.canonicalScenario;
+    // Preserve the UI briefing hash so the frontend can match this record to
+    // its active scenario (the canonical SHA-256 alone cannot).
+    canonicalScenario = payload.canonicalScenario?.briefingScenarioHash
+      ? { ...canonicalRes.canonicalScenario, briefingScenarioHash: payload.canonicalScenario.briefingScenarioHash }
+      : canonicalRes.canonicalScenario;
     authoritativeHash = canonicalRes.scenarioHash;
   }
 

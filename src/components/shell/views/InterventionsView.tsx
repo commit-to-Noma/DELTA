@@ -42,6 +42,7 @@ import {
   ComparisonViewMode
 } from '../../simulation/SplitComparisonCanvas';
 import { CanvasLayerDock } from '../../simulation/CanvasLayerDock';
+import { prepareWorkOrderFromDecision, saveStoredWorkOrder } from '../../../simulation/workOrderEngine';
 
 interface InterventionsViewProps {
   onNavigateToDecisions?: () => void;
@@ -256,6 +257,13 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
           } catch { setConfluenceNotice('Confluence audit export was not completed (requires Forge Confluence access).'); }
         }
         registerNewDecision(saved);
+        // Stage a real work order bound to the server-saved decision so Step 05
+        // dispatch operates on a decisionId that actually exists in KVS.
+        try {
+          const staged = { ...prepareWorkOrderFromDecision(saved, 'COMMANDER_STAGED'), stage: 'COMMANDER_STAGED' as const, updatedAt: new Date().toISOString() };
+          saveStoredWorkOrder(staged);
+          await invokeSafe('saveWorkOrder', staged);
+        } catch { /* decision is saved; work order can still be staged from Decision Records */ }
         await refreshGovernanceRecords();
         setIsApprovalModalOpen(false);
       } else {
