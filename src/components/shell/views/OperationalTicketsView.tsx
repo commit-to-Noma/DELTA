@@ -768,7 +768,9 @@ export const OperationalTicketsView: React.FC = () => {
                         </div>
                       )}
                       {(wo.stage === 'COMMANDER_STAGED' || wo.stage === 'JIRA_LINKED') && (
-                        <button onClick={() => handleDispatchLive(wo)} disabled={dispatchState[wo.workOrderId]?.status === 'working'} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded font-bold text-xs whitespace-nowrap">{dispatchState[wo.workOrderId]?.status === 'working' ? 'DISPATCHING…' : 'DISPATCH LIVE JIRA ISSUE'}</button>
+                        ['DEC-2026-079', 'DEC-2026-080', 'DEC-2026-081'].includes(wo.decisionId)
+                          ? <span className="px-3 py-1 rounded bg-onyx-800 border border-onyx-700 text-storm-400 font-bold text-xs whitespace-nowrap">Demo example — approve in Step 03 to create a dispatchable work order</span>
+                          : <button onClick={() => handleDispatchLive(wo)} disabled={dispatchState[wo.workOrderId]?.status === 'working'} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded font-bold text-xs whitespace-nowrap">{dispatchState[wo.workOrderId]?.status === 'working' ? 'DISPATCHING…' : 'DISPATCH LIVE JIRA ISSUE'}</button>
                       )}
                       {dispatchState[wo.workOrderId] && (
                         <span className={`text-xs font-bold ${dispatchState[wo.workOrderId].status === 'error' ? 'text-red-300' : dispatchState[wo.workOrderId].status === 'success' ? 'text-emerald-300' : 'text-cyan-300'}`}>{dispatchState[wo.workOrderId].message}</span>
