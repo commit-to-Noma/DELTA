@@ -19,7 +19,7 @@ flowchart LR
 - **Dynamic project scoping:** approvals, links, dispatch, and the workflow gate bind to the project from Forge invocation context (or the linked issue), not a hard-coded key.
 - **Authorization:** primary role is Jira project role `Incident Commanders` (direct or verified-group membership). `Administrators` is a fallback only when that role is not configured on the project (fresh demo sites). All checks fail closed.
 - **Live dispatch:** human-triggered only. A ticket counts as dispatched only when Jira returns a real issue key; the UI shows its clickable browse link. Nothing is fabricated outside Forge.
-- **Audit:** Confluence export is an opt-in checkbox (OFF by default) on decision approval.
+- **Audit:** Confluence export is an opt-in checkbox (OFF by default) on decision approval; the space key is optional/editable and otherwise the first available Confluence space is auto-discovered.
 
 ## Setup (judge demo site)
 

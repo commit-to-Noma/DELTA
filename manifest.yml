@@ -112,6 +112,8 @@ permissions:
     - write:jira-work
     - storage:app
     - write:confluence-content
+    - read:space:confluence
+    - read:jira-user
 
 app:
   id: ari:cloud:ecosystem::app/7c4b604a-2340-4df7-8c0a-8fd8e44b7a12

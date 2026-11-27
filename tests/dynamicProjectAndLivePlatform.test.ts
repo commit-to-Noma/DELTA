@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { verifyIncidentCommanderAuthorization } from '../src/resolvers/authPolicy.js';
 import { recordDecision, __resetInMemoryStore } from '../src/resolvers/decisionStorage.js';
 import { validateTransition } from '../src/resolvers/workflowValidator.js';
@@ -77,6 +79,33 @@ describe('Dynamic project binding, Admin fallback, TWG & Confluence', () => {
     }, null, { accountId: 'qm:commander-demo' });
     const ok: any = await publishAuditToConfluence({ decisionId: 'DEC-CONF-1', spaceKey: 'OPS' }, { customConfluenceClient: { async createPage() { return { id: '123', _links: { webui: '/wiki/pages/123' } }; } } });
     expect(ok.success).toBe(true); expect(ok.pageId).toBe('123');
-    await expect(publishAuditToConfluence({ decisionId: 'DEC-CONF-1', spaceKey: 'OPS' }, {})).rejects.toThrow(/requires a Forge runtime/);
+    await expect(publishAuditToConfluence({ decisionId: 'DEC-CONF-1', spaceKey: 'OPS' }, {})).rejects.toThrow(/No Confluence space available|requires a Forge runtime/);
+  });
+
+  it('Confluence export auto-discovers first space when key missing or unknown (e.g. DELTA)', async () => {
+    await recordDecision({
+      decisionId: 'DEC-CONF-2', scenarioHash: 'hash-3', status: 'APPROVED', linkedIssueKey: 'DEMO-21',
+      chosenPlan: { planId: 'plan-beta', name: 'Plan Beta' }, engineeringRationale: 'Approved based on deterministic solver output.', humanApprover: { accountId: 'qm:commander-demo', displayName: 'Cmdr Demo' }
+    }, null, { accountId: 'qm:commander-demo' });
+    const captured: any[] = [];
+    const client = {
+      async requestConfluence(url: string, opts: any = {}) {
+        if (url.includes('/spaces')) return { results: [{ key: 'FRESH', name: 'Fresh Demo Space' }] };
+        captured.push(opts.body);
+        return { id: '999', _links: { webui: '/wiki/spaces/FRESH/pages/999' } };
+      }
+    };
+    const noKey: any = await publishAuditToConfluence({ decisionId: 'DEC-CONF-2' }, { customConfluenceClient: client });
+    expect(noKey.success).toBe(true); expect(noKey.spaceKey).toBe('FRESH'); expect(noKey.spaceDiscovered).toBe(true); expect(noKey.pageUrl).toContain('/999');
+    expect(captured[0].space.key).toBe('FRESH');
+    const unknownKey: any = await publishAuditToConfluence({ decisionId: 'DEC-CONF-2', spaceKey: 'DELTA' }, { customConfluenceClient: client });
+    expect(unknownKey.spaceKey).toBe('FRESH'); expect(unknownKey.spaceDiscovered).toBe(true);
+  });
+
+  it('manifest declares scopes for Jira user-groups lookup and Confluence space discovery', () => {
+    const manifest = fs.readFileSync(path.resolve(__dirname, '../manifest.yml'), 'utf8');
+    expect(manifest).toContain('read:jira-user');
+    expect(manifest).toContain('read:space:confluence');
+    expect(manifest).toContain('write:confluence-content');
   });
 });
