@@ -45,6 +45,8 @@ export interface SimulationState {
 export interface StepOptions {
   dtMacroSeconds: number; // Duration of macro step (e.g. 1.0 or 2.0 s)
   rainfallRateMmPerHour: number; // Uniform or spatially-averaged rainfall
+  // Screening solves may relax the 0.5 s precision cap; CFL/diffusion limits still govern stability.
+  maxSubStepSeconds?: number;
 }
 
 /**
@@ -171,8 +173,8 @@ export function stepHydraulics(
     const waveSpeed = Math.sqrt(9.81 * Math.max(0.01, maxDepth));
     const dtAdvective = (0.5 * dx) / (waveSpeed + 1.0);
 
-    // Limit maximum sub-step to 0.5s for precision; prevent sub-step from exceeding dtRemaining
-    let dtSub = Math.min(dtRemaining, 0.5, dtDiffusive, dtAdvective);
+    // Limit maximum sub-step for precision; prevent sub-step from exceeding dtRemaining
+    let dtSub = Math.min(dtRemaining, options.maxSubStepSeconds ?? 0.5, dtDiffusive, dtAdvective);
     if (dtSub < 0.01 && dtRemaining >= 0.01) {
       dtSub = 0.01; // Floor to prevent infinite stalls, but never exceed dtRemaining
     } else if (dtSub > dtRemaining) {

@@ -381,7 +381,7 @@ export const FloodSimulationView: React.FC = () => {
               <div className="absolute inset-0 z-20 bg-onyx-950/75 flex items-center justify-center">
                 <div className="bg-onyx-900 border border-onyx-700 rounded px-4 py-3 flex items-center gap-2.5 text-xs font-mono text-cyan-300">
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Recalculating 2D hydraulic solver for active disruption configuration...</span>
+                  <span>Recalculating 2D hydraulic solver — first run for a setup can take about a minute; results are cached after that...</span>
                 </div>
               </div>
             )}
