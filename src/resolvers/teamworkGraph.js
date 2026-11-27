@@ -24,10 +24,18 @@ export async function fetchLiveJiraNodes(projectKey, options = {}) {
     if (typeof options.customJiraClient?.searchJira === 'function') {
       issues = await options.customJiraClient.searchJira(jql);
     } else if (typeof options.customJiraClient?.requestJira === 'function') {
-      const res = await options.customJiraClient.requestJira(`/rest/api/3/issue/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=key,summary,status,issuetype,labels`, { method: 'GET' });
+      const res = await options.customJiraClient.requestJira('/rest/api/3/search/jql', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jql, maxResults: 50, fields: ['summary', 'status', 'priority', 'issuetype', 'created', 'labels'] })
+      });
       issues = Array.isArray(res?.issues) ? res.issues : (Array.isArray(res) ? res : []);
     } else if (hasForgeRuntime()) {
-      const resp = await api.asApp().requestJira(route`/rest/api/3/issue/search?jql=${jql}&maxResults=50&fields=key,summary,status,issuetype,labels`);
+      const resp = await api.asApp().requestJira(route`/rest/api/3/search/jql`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jql, maxResults: 50, fields: ['summary', 'status', 'priority', 'issuetype', 'created', 'labels'] })
+      });
       if (!resp.ok) return { nodes: [], edges: [], liveStatus: `JIRA_QUERY_FAILED_${resp.status}` };
       issues = (await resp.json()).issues || [];
     } else {

@@ -547,12 +547,12 @@ function getScheduleRateAtElapsed(schedule: RainfallScheduleInput, elapsedSecond
  * Executes a full spatial 2D solver comparison between unobstructed nominal drainage
  * and the active set of physical drainage disruptions under the exact selected rainfall profile.
  */
-export function executeSpatialDisruptionComparison(
+export function* executeSpatialDisruptionComparisonSteps(
   dataset: BostonCatchmentDataset,
   activeDisruptionIds: string[],
   schedule: RainfallScheduleInput,
   dtMacro: number = 30.0
-): SpatialDisruptionComparisonResult {
+): Generator<void, SpatialDisruptionComparisonResult, void> {
   const { nx } = dataset.metadata.grid;
   const activeDisruptions = activeDisruptionIds
     .map((id) => AUTHORITATIVE_DISRUPTIONS.find((d) => d.id === id))
@@ -597,6 +597,7 @@ export function executeSpatialDisruptionComparison(
       dtMacroSeconds: dtMacro,
       rainfallRateMmPerHour: rate
     });
+    if (s % 20 === 19) yield;
   }
 
   // Step Disrupted State (if no disruptions active, clone nominal deterministically)
@@ -618,6 +619,7 @@ export function executeSpatialDisruptionComparison(
         dtMacroSeconds: dtMacro,
         rainfallRateMmPerHour: rate
       });
+      if (s % 20 === 19) yield;
     }
   }
 
@@ -755,4 +757,33 @@ export function executeSpatialDisruptionComparison(
     affectedInletMetrics,
     causalSummary
   };
+}
+
+
+export function executeSpatialDisruptionComparison(
+  dataset: BostonCatchmentDataset,
+  activeDisruptionIds: string[],
+  schedule: RainfallScheduleInput,
+  dtMacro: number = 30.0
+): SpatialDisruptionComparisonResult {
+  const gen = executeSpatialDisruptionComparisonSteps(dataset, activeDisruptionIds, schedule, dtMacro);
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
+}
+
+/** Chunked variant: yields to the event loop between solver step batches so Forge iframes stay responsive. */
+export async function executeSpatialDisruptionComparisonAsync(
+  dataset: BostonCatchmentDataset,
+  activeDisruptionIds: string[],
+  schedule: RainfallScheduleInput,
+  dtMacro: number = 30.0
+): Promise<SpatialDisruptionComparisonResult> {
+  const gen = executeSpatialDisruptionComparisonSteps(dataset, activeDisruptionIds, schedule, dtMacro);
+  let step = gen.next();
+  while (!step.done) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    step = gen.next();
+  }
+  return step.value;
 }

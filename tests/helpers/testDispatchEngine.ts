@@ -115,10 +115,11 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
     if (typeof customJiraClient?.searchJira === 'function') {
       existingJiraIssues = await customJiraClient.searchJira(searchJql);
     } else if (typeof customJiraClient?.requestJira === 'function') {
-      const searchRes = await customJiraClient.requestJira(
-        `/rest/api/3/issue/search?jql=${encodeURIComponent(searchJql)}&fields=key,id,summary,status`,
-        { method: 'GET' }
-      );
+      const searchRes = await customJiraClient.requestJira('/rest/api/3/search/jql', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jql: searchJql, maxResults: 50, fields: ['summary', 'status', 'priority', 'issuetype', 'created'] })
+      });
       if (Array.isArray(searchRes?.issues)) {
         existingJiraIssues = searchRes.issues;
       }
@@ -127,9 +128,11 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
         (typeof (globalThis as any).__forge_fetch__ === 'function' || typeof (globalThis as any).__forge_local_fetch__ === 'function');
 
       if (hasForgeRuntime) {
-        const searchResp = await api.asApp().requestJira(
-          route`/rest/api/3/issue/search?jql=${searchJql}&fields=key,id,summary,status`
-        );
+        const searchResp = await api.asApp().requestJira(route`/rest/api/3/search/jql`, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jql: searchJql, maxResults: 50, fields: ['summary', 'status', 'priority', 'issuetype', 'created'] })
+        });
         if (searchResp.ok) {
           const searchData = await searchResp.json();
           existingJiraIssues = searchData.issues || [];

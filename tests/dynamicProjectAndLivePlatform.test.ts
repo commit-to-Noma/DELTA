@@ -64,8 +64,13 @@ describe('Dynamic project binding, Admin fallback, TWG & Confluence', () => {
   });
 
   it('queryTeamworkGraph returns live Jira nodes alongside spatial nodes, no fabricated mock IDs', async () => {
-    const customJiraClient = { async requestJira() { return { issues: [{ key: 'DEMO-9', fields: { summary: 'Dispatch culvert crew', status: { name: 'To Do' }, labels: ['delta-dispatch'] } }] }; } };
+    const searchCalls: any[] = [];
+    const customJiraClient = { async requestJira(url: string, opts: any) { searchCalls.push({ url, opts }); return { issues: [{ key: 'DEMO-9', fields: { summary: 'Dispatch culvert crew', status: { name: 'To Do' }, labels: ['delta-dispatch'] } }] }; } };
     const res: any = await queryTeamworkGraph(null, { projectKey: 'DEMO', customJiraClient });
+    expect(searchCalls).toHaveLength(1);
+    expect(searchCalls[0].url).toBe('/rest/api/3/search/jql');
+    expect(searchCalls[0].opts.method).toBe('POST');
+    expect(JSON.parse(searchCalls[0].opts.body).jql).toContain('project = "DEMO"');
     expect(res.success).toBe(true);
     expect(res.nodes.some((n: any) => n.id === 'ISSUE-DEMO-9' && n.type === 'DISPATCH_WORK_ORDER')).toBe(true);
     expect(JSON.stringify(res)).not.toContain('EMERG-101'); expect(JSON.stringify(res)).not.toContain('4903');
