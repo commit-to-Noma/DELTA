@@ -34,6 +34,12 @@ In the target project, optionally create a project role named `Incident Commande
 
 > Judges: toggle DELTA's MCP tools ON in app settings to use them from Rovo / an MCP client.
 
+## Judge & Admin Setup (3 Minutes) — live-verified on one-atlas-xttm.atlassian.net
+1. **Enable Rovo Agent Access**: Admin → **AI and Rovo → Agents → DELTA Hydraulic Advisor → Add to group** → add your Jira users group (e.g. `jira-users-<site>`). Required after install/major upgrade — with no group assigned the agent is invisible in Rovo Chat. Verified: agent reappears in the picker and runs live DELTA tool calls.
+2. **Enable Atlassian MCP (`rovo:mcp`)**: Admin → **Connected Apps → delta-decision-engine → Tools** → toggle **Expose tools to MCP-compatible apps** ON. Then any MCP client (Copilot/Claude/Cursor) can call the tools in `mcp/SKILL.md`.
+3. **Attach Proactive Workflow Gate**: Project Settings → **Workflows → Edit workflow → Done** transition (Any status) → **Validate details → Add rule → Marketplace Rules → DELTA Decision Record Approval Gate → Add → Update workflow**.
+4. **Verify Full Gate (Block → Pass)**: move an unlinked flood issue to *Done* — it is blocked (HTTP 400, *"DELTA Gate Blocked: …cannot transition without an approved mitigation plan"*, verified live on PLAT-33511). Then in DELTA approve a Decision Record **linked to that exact issue key** and retry — the transition passes. The gate checks Forge KVS for an approved, project-bound record for that issue key only.
+
 ## Verify
 
 ```bash
