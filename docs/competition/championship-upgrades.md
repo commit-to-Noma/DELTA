@@ -3,7 +3,7 @@
 Rule: every upgrade boosts a 20% rubric criterion without muddying the Golden Journey
 (Intelligence → Simulation → Interventions → Decision → Confluence → Dispatch → Validator).
 
-Devpost (verify live): **Codegeist 2025: Agents for a New Era** — deadline **Dec 22, 10:00pm GMT+2**.
+Devpost: **Codegeist 2026: Build with context. Ship with confidence** (codegeist2026.devpost.com) — deadline **Dec 22, 2026, 10:00pm GMT+2**.
 Prizes: 1st $15,000 + Team 2027; bonuses $1,500 each (Rovo/MCP, TWG, Marketplace, Best in EMEA/APAC).
 Special judge: Adam Moore, Product Lead, Rovo MCP & Rovo Skills: *“fits seamlessly into how people already work”.*
 

@@ -40,7 +40,7 @@ In the target project, optionally create a project role named `Incident Commande
 npm run lint && npm test && npm run build && forge lint
 ```
 
-## Championship upgrades (Codegeist 2025)
+## Championship upgrades (Codegeist 2026)
 Full plan: `docs/competition/championship-upgrades.md`. In one line each:
 1. **Click-Anywhere Sandbox** (Simulation screen): enable, pick Pump/Barrier/Blockage + strength + rainfall scale, click any cell — the real 2D solver recomputes and reports avoided volume + adverse cells (screening representation). Golden Journey is untouched unless you place an action.
 2. **Proactive trigger + panel snapshot**: creating a flood/drainage Jira issue posts one deduped DELTA risk comment (honest `NO_RUN` if no run is stored); the issue panel shows a compact flood-impact snapshot with a deep link back to the DELTA Engine.
