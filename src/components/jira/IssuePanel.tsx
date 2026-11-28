@@ -59,7 +59,9 @@ interface LinkedDecision {
 }
 
 export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenFullApp }) => {
-  const [issueKey, setIssueKey] = useState<string>(initialIssueKey || 'EMERG-101');
+  const [issueKey, setIssueKey] = useState<string>(initialIssueKey || '');
+  const [snapshot, setSnapshot] = useState<any>(null);
+  useEffect(() => { invokeSafe('getSimulationSnapshotForPanel').then((r: any) => setSnapshot(r)).catch(() => setSnapshot(null)); }, []);
   const [linkedDecision, setLinkedDecision] = useState<LinkedDecision | null>(null);
   const [linkedWorkOrder, setLinkedWorkOrder] = useState<OperationalWorkOrder | null>(null);
   const [availableDecisions, setAvailableDecisions] = useState<LinkedDecision[]>([]);
@@ -340,7 +342,23 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
         </div>
       )}
 
-      {isLoading ? (
+      <div className="p-3 rounded-lg bg-onyx-900 border border-cyan-800/60 space-y-1 text-[11px]" data-testid="flood-impact-snapshot">
+        <div className="font-bold text-white uppercase tracking-wider">Flood-impact snapshot</div>
+        {snapshot?.simulation?.data ? (
+          <div className="grid grid-cols-3 gap-2 font-mono">
+            <span>Peak depth<br /><strong className="text-cyan-300">{snapshot.simulation.data.maxWaterDepthM ?? '—'} m</strong></span>
+            <span>Storage<br /><strong className="text-cyan-300">{Math.round(snapshot.simulation.data.currentStorageM3 || 0).toLocaleString()} m³</strong></span>
+            <span>Avoided (eval)<br /><strong className="text-emerald-300">{snapshot.evaluation?.data?.differentials?.['plan-gamma']?.avoidedSurfaceVolumeM3 != null ? `${Math.round(snapshot.evaluation.data.differentials['plan-gamma'].avoidedSurfaceVolumeM3).toLocaleString()} m³` : 'Run Phase 3'}</strong></span>
+          </div>
+        ) : <div className="text-storm-400">No stored simulation run yet — open DELTA Engine and run the Golden Journey.</div>}
+        <div className="flex gap-3 pt-1">
+          {linkedDecision && <span className="text-storm-300">Decision: {linkedDecision.decisionId}</span>}
+          <span className="text-storm-500">Confluence audit link appears on the Decision &amp; Briefing screen after Publish.</span>
+          {onOpenFullApp && <button type="button" onClick={onOpenFullApp} className="text-safety-orange underline">Open Ops Center (DELTA Engine)</button>}
+        </div>
+      </div>
+
+      {!issueKey ? <div className="p-3 rounded bg-onyx-900 border border-onyx-700 text-storm-300 text-[11px]">Open this panel from a real Jira issue to load its linked decision.</div> : isLoading ? (
         <div className="p-6 text-center text-storm-400 space-y-2">
           <RefreshCw className="w-5 h-5 animate-spin mx-auto text-safety-orange" />
           <div>Querying Forge KVS for issue-linked decision records...</div>

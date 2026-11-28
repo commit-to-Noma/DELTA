@@ -36,12 +36,14 @@ export async function createTestDispatchTicket(dispatchOrder: any, options: any 
     throw err;
   }
 
-  // Dynamic project: decision binding (set below) is authoritative; payload override checked after decision load.
-  const projectKey: string | null = null;
+  // Dynamic project: peek the decision first so auth is scoped to its bound project (mirrors production).
+  const peekClient = getStorageClient(storageOverride);
+  const peekDecision = await getDecision(dispatchOrder.decisionId, peekClient);
+  const derivedProject = (peekDecision as any)?.data?.projectKey || (peekDecision as any)?.data?.linkedIssueKey?.split('-')[0] || dispatchOrder.projectKey || null;
 
   const auth = await verifyIncidentCommanderAuthorization({
     accountId: authenticatedCaller,
-    projectKey: dispatchOrder.projectKey || undefined,
+    projectKey: derivedProject || undefined,
     customAuthPolicy
   });
 

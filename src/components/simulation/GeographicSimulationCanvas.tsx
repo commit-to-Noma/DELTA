@@ -87,6 +87,7 @@ export interface GeographicSimulationCanvasProps {
   selectedRoadId?: string | null;
   selectedFacilityId?: string | null;
   stagedWorkOrders?: OperationalWorkOrder[];
+  customActions?: { id: string; row: number; col: number; type: string }[];
   activePlanId?: 'plan-alpha' | 'plan-beta' | 'plan-gamma' | null;
   selectedWorkOrderId?: string | null;
   onCellHover?: (info: CellHoverInfo | null) => void;
@@ -107,6 +108,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
   selectedRoadId,
   selectedFacilityId,
   stagedWorkOrders = [],
+  customActions = [],
   activePlanId = null,
   selectedWorkOrderId = null,
   onCellHover,
@@ -921,6 +923,15 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       }
     }
 
+    if (customActions.length > 0) {
+      for (const a of customActions) {
+        const px = originX + (a.col + 0.5) * cellSize; const py = originY + (a.row + 0.5) * cellSize;
+        const color = a.type === 'PUMP' ? '#22d3ee' : a.type === 'BARRIER' ? '#f97316' : '#ef4444';
+        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px, py, cellSize * 1.7, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = color; ctx.font = 'bold 8px monospace'; ctx.fillText(a.type, px - 14, py - cellSize * 1.9); ctx.restore();
+      }
+    }
+
     // 9. Render Hovered & Selected Cell Reticle
     const activeCell = selectedCell || internalHover;
     if (activeCell) {
@@ -1096,6 +1107,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     selectedRoadId,
     selectedWorkOrderId,
     stagedWorkOrders,
+    customActions,
     viewMode,
     waterDepth,
     xmax,

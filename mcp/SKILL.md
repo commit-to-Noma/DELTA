@@ -26,15 +26,13 @@ When explaining intervention options to responders or Incident Commanders:
    - **Physics**: Deflects overland water locally away from Brigham & Women's Hospital ambulance bay.
    - **Trade-off**: Does **NOT** reduce catchment-wide flood storage ($0\text{ m}^3$ avoided). Diverts flow into adjacent streets.
 
-2. **Plan Beta: Mobile High-Capacity Suction Pump #1**
-   - **Mechanism**: Active $2.0\text{ m}^3/\text{s}$ suction pump operating at Muddy River retention channel (`[17, 25]`).
-   - **Physics**: Mechanically extracts surface water into downstream drainage.
-   - **Trade-off**: Provides local basin relief (avoids $\sim 3,500\text{ m}^3$), but mechanical pumping rate is capacity-limited compared to gravitational discharge.
+2. **Plan Beta: Mobile pump**
+   - **Mechanism**: A $2.0\text{ m}^3/\text{s}$ sink at the modelled pump cell (see solver source for the exact cell).
+   - **Physics**: Mechanically extracts surface water. Report only the avoided volume returned by `evaluate-interventions`; never estimate it.
 
 3. **Plan Gamma: Emergency Hydro-Jetting Culvert Clearance**
-   - **Mechanism**: Hydro-jetting field crew unchokes `CULVERT-01-BROOKLINE` (`[19, 23]`), restoring nominal $12.5\text{ m}^3/\text{s}$ gravity outflow.
-   - **Physics**: Re-establishes high-capacity gravitational conveyance, lowering headwater depths and draining upstream ponding.
-   - **Recommendation**: **Highest objective efficacy** (avoids $> 11,000\text{ m}^3$ of surface water and restores accessibility for all 5 hospital complexes).
+   - **Mechanism**: Clears the modelled Brookline culvert blockage, restoring its modelled capacity (see solver source).
+   - **Physics**: Re-establishes gravity conveyance. Report only solver-returned differentials; do not claim hospital access is guaranteed.
 
 ---
 
@@ -50,3 +48,14 @@ Explain the ranking using the returned physical parameters and avoided surface s
 
 ### 3. Verification of Incident Decisions
 Call `delta_get_decision_records` to verify whether an Incident Commander has signed an approved mitigation plan before advising Jira field dispatch.
+
+## Live tool names (Forge `rovo:mcp` server `DELTA Hydraulic MCP`)
+Use these exact tool/action keys when calling from an external agent (Copilot Desktop, Claude, Cursor):
+`get-simulation-status`, `evaluate-interventions`, `get-decision-record`, `list-decision-records`, `query-teamwork-graph`, `query-facility-dependencies`, `query-related-context`.
+If a tool returns `NO_RUN`, say no simulation has been stored yet and ask the user to run DELTA Phase 1–3 first. Never substitute remembered numbers.
+
+## External-agent verification (for demo video, ~20s clip)
+1. Install DELTA on a test site and run Phases 1–3 so KVS has a stored run.
+2. Connect your external agent to the Atlassian Rovo MCP endpoint for that site (OAuth as a user who can see the project).
+3. Prompt: “Use DELTA Hydraulic MCP: call get-simulation-status, then evaluate-interventions, and explain the recommended plan using only returned numbers.”
+4. Record the tool-call trace + answer. See `scripts/verify-rovo-mcp.mjs` for a checklist version of this proof.

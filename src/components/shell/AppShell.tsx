@@ -30,6 +30,7 @@ import { DecisionBriefingView } from './views/DecisionBriefingView';
 import { OperationalTicketsView } from './views/OperationalTicketsView';
 import { IssuePanel } from '../jira/IssuePanel';
 import { LiveContextStatus } from './LiveContextStatus';
+import { GovernanceSettings } from './GovernanceSettings';
 
 export type ShellTab = WorkspaceStage;
 
@@ -64,6 +65,7 @@ const AppShellInner: React.FC<AppShellProps> = ({ onExitToLanding }) => {
   } = useIncidentWorkspace();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
 
   const profileShortLabel =
@@ -177,10 +179,11 @@ const AppShellInner: React.FC<AppShellProps> = ({ onExitToLanding }) => {
             <span>Jira Panel</span>
           </button>
 
-          <div className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-storm-300 px-2.5 py-1 bg-onyx-950 rounded border border-onyx-800">
+          <button type="button" onClick={() => setSettingsOpen(true)} className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-storm-300 px-2.5 py-1 bg-onyx-950 rounded border border-onyx-800 hover:border-onyx-600" title="Governance settings and judge seed">
             <User className="w-3.5 h-3.5 text-storm-400" />
-            <span className="text-storm-200 font-medium">Duty Incident Commander</span>
-          </div>
+            <span className="text-storm-200 font-medium">Duty Incident Commander · Settings</span>
+          </button>
+          <GovernanceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
           <button
             type="button"
@@ -433,11 +436,11 @@ const AppShellInner: React.FC<AppShellProps> = ({ onExitToLanding }) => {
                     <span>JIRA ISSUE PANEL CONTEXTUAL INTEGRATION</span>
                   </div>
                   <div className="text-[11px] text-storm-400">
-                    Target: <code className="text-storm-200">EMERG-101</code> · Scenario Hash:{' '}
+                    Contextual panel preview · Scenario Hash:{' '}
                     <code className="text-cyan-300">{activeScenarioHash || 'Computing'}</code>
                   </div>
                 </div>
-                <IssuePanel initialIssueKey="EMERG-101" onOpenFullApp={() => setActiveStage('interventions')} />
+                <IssuePanel onOpenFullApp={() => setActiveStage('interventions')} />
               </div>
             )}
           </div>

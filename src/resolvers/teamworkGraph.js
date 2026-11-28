@@ -16,6 +16,53 @@ function hasForgeRuntime() {
   return typeof globalThis !== 'undefined' && (typeof globalThis.__forge_fetch__ === 'function' || typeof globalThis.__forge_local_fetch__ === 'function');
 }
 
+/**
+ * Real Atlassian GraphQL Teamwork Graph lookup (gateway.api.atlassian.com/graphql).
+ * Public-preview API, no allowlisting. Best-effort: any failure returns TWG_UNAVAILABLE
+ * and callers merge Jira nodes — never fabricated as graph data.
+ */
+export async function fetchTeamworkGraphContext(options = {}) {
+  const query = 'flood drainage culvert Longwood';
+  try {
+    if (typeof options.customGraphClient?.search === 'function') {
+      const r = await options.customGraphClient.search(query);
+      const items = Array.isArray(r) ? r : (r?.results || r?.nodes || []);
+      return { nodes: items.map((it, i) => ({ id: it.id || `TWG-${i + 1}`, type: it.type || 'TEAMWORK_GRAPH_ENTITY', name: it.name || it.title || 'Related entity', metadata: { url: it.url || null, source: 'teamwork-graph', summary: it.summary || it.excerpt || null } })), liveStatus: 'LIVE_TEAMWORK_GRAPH' };
+    }
+    if (hasForgeRuntime() && typeof api.asApp().requestGraphQL === 'function') {
+      const resp = await api.asApp().requestGraphQL(`query { search(query: "${query}") { results { id title url type excerpt } } }`).catch(() => null);
+      const json = resp?.data ? resp : (resp?.json ? await resp.json().catch(() => null) : null);
+      const results = json?.data?.search?.results || [];
+      if (!results.length) return { nodes: [], liveStatus: 'TWG_UNAVAILABLE' };
+      return { nodes: results.map((it, i) => ({ id: it.id || `TWG-${i + 1}`, type: it.type || 'TEAMWORK_GRAPH_ENTITY', name: it.title || 'Related entity', metadata: { url: it.url || null, source: 'teamwork-graph', summary: it.excerpt || null } })), liveStatus: 'LIVE_TEAMWORK_GRAPH' };
+    }
+  } catch { return { nodes: [], liveStatus: 'TWG_UNAVAILABLE' }; }
+  return { nodes: [], liveStatus: 'TWG_UNAVAILABLE' };
+}
+
+export async function fetchRelatedContext(projectKey, options = {}) {
+  const nodes = []; const statuses = [];
+  const like = (v) => typeof v === 'string' && v.length > 0;
+  const push = (arr, prefix) => { for (const it of arr || []) nodes.push({ id: `${prefix}-${it.id || it.key || nodes.length + 1}`, type: prefix === 'CONFLUENCE' ? 'RUNBOOK' : prefix === 'COMPASS' ? 'SERVICE_OWNER' : 'TEAMWORK_GRAPH_ENTITY', name: it.title || it.name || it.key || 'Related context', metadata: { url: it.url || it.self || null, source: prefix.toLowerCase(), summary: it.excerpt || it.summary || null } }); };
+  try {
+    if (options.customJiraClient?.requestConfluence) { const r = await options.customJiraClient.requestConfluence('/wiki/rest/api/content/search?cql=text~"flood%20drainage"&limit=5'); push(Array.isArray(r) ? r : r?.results, 'CONFLUENCE'); statuses.push('LIVE_CONFLUENCE'); }
+    else if (options.customConfluenceClient?.search) { const r = await options.customConfluenceClient.search('flood drainage'); push(Array.isArray(r) ? r : r?.results, 'CONFLUENCE'); statuses.push('LIVE_CONFLUENCE'); }
+    else if (hasForgeRuntime()) { const resp = await api.asApp().requestConfluence(route`/wiki/rest/api/content/search?cql=text~"flood drainage"&limit=5`).catch(() => null); if (resp?.ok) { const j = await resp.json(); push(j?.results, 'CONFLUENCE'); statuses.push('LIVE_CONFLUENCE'); } else statuses.push('CONFLUENCE_UNAVAILABLE'); }
+    else statuses.push('CONFLUENCE_UNAVAILABLE');
+  } catch { statuses.push('CONFLUENCE_UNAVAILABLE'); }
+  try {
+    if (options.customGraphClient?.requestCompass) { const r = await options.customGraphClient.requestCompass(); push(Array.isArray(r) ? r : r?.components, 'COMPASS'); statuses.push('LIVE_COMPASS'); }
+    else statuses.push('COMPASS_UNAVAILABLE');
+  } catch { statuses.push('COMPASS_UNAVAILABLE'); }
+  // Historical incidents = labeled Jira issues (real), never invented.
+  try {
+    if (projectKey && hasForgeRuntime()) { /* covered by fetchLiveJiraNodes in queryTeamworkGraph */ statuses.push('HISTORY_VIA_JIRA'); }
+    else if (projectKey && options.customJiraClient) statuses.push('HISTORY_VIA_JIRA');
+  } catch { /* ignore */ }
+  void like;
+  return { nodes, liveStatus: statuses.join('+') || 'CONTEXT_UNAVAILABLE' };
+}
+
 export async function fetchLiveJiraNodes(projectKey, options = {}) {
   if (!projectKey) return { nodes: [], edges: [], liveStatus: 'NO_PROJECT_CONTEXT' };
   const jql = `project = "${projectKey}" ORDER BY updated DESC`;
@@ -203,12 +250,17 @@ export const AUTHORITATIVE_GRAPH_EDGES = [
 export async function queryTeamworkGraph(filterType = null, options = {}) {
   const projectKey = options.projectKey || resolveTrustedProject(options.context).projectKey || null;
   const live = await fetchLiveJiraNodes(projectKey, options);
-  const allNodes = [...AUTHORITATIVE_GRAPH_NODES, ...live.nodes];
-  const allEdges = [...AUTHORITATIVE_GRAPH_EDGES, ...live.edges];
+  const twg = await fetchTeamworkGraphContext(options);
+  const related = await fetchRelatedContext(projectKey, options);
+  const contextNodes = [...twg.nodes, ...related.nodes];
+  const contextEdges = contextNodes.map((n, i) => ({ id: `EDGE-CTX-${i + 1}`, sourceNodeId: n.id, targetNodeId: 'DRAIN-CULVERT-01', relationType: 'RELATED_TO', attributes: { source: n.metadata?.source || 'context' } }));
+  const allNodes = [...AUTHORITATIVE_GRAPH_NODES, ...live.nodes, ...contextNodes];
+  const allEdges = [...AUTHORITATIVE_GRAPH_EDGES, ...live.edges, ...contextEdges];
   const nodes = filterType ? allNodes.filter(n => n.type === filterType) : allNodes;
   const nodeIds = new Set(nodes.map(n => n.id));
   const edges = allEdges.filter(e => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId));
-  return { success: true, nodes, edges, queriedAt: new Date().toISOString(), sector: 'Boston Longwood Medical Area & Muddy River Basin', projectKey, liveStatus: live.liveStatus };
+  const liveStatus = [live.liveStatus, twg.liveStatus, related.liveStatus].filter(Boolean).join('+');
+  return { success: true, nodes, edges, queriedAt: new Date().toISOString(), sector: 'Boston Longwood Medical Area & Muddy River Basin', projectKey, liveStatus };
 }
 
 /**

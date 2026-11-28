@@ -22,7 +22,13 @@ modules:
         - list-decision-records
         - query-teamwork-graph
         - query-facility-dependencies
+        - query-related-context
 
+  trigger:
+    - key: delta-proactive-flood-trigger
+      function: proactive-trigger
+      events:
+        - avi:jira:created:issue
   jira:workflowValidator:
     - key: delta-decision-record-validator
       name: DELTA Decision Record Approval Gate
@@ -47,6 +53,7 @@ modules:
         - list-decision-records
         - query-teamwork-graph
         - query-facility-dependencies
+        - query-related-context
   action:
     - key: get-simulation-status
       name: Get Simulation Status
@@ -96,11 +103,18 @@ modules:
           type: string
           required: true
           description: Facility node ID (for example FACILITY-BWH)
+    - key: query-related-context
+      name: Query Related Context
+      function: rovo-action-handler
+      actionVerb: GET
+      description: Returns related Confluence runbooks, Teamwork Graph entities, and service-owner context for the flood catchment when available.
   function:
     - key: rovo-action-handler
       handler: resolvers/index.handler
     - key: workflow-validator
       handler: resolvers/workflowValidator.handler
+    - key: proactive-trigger
+      handler: resolvers/proactiveTrigger.handler
 
 resources:
   - key: main-ui
@@ -114,6 +128,9 @@ permissions:
     - write:confluence-content
     - write:page:confluence
     - read:space:confluence
+    - read:page:confluence
+    - read:comment:confluence
+    - write:comment:confluence
     - read:jira-user
 
 app:

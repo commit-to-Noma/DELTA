@@ -39,10 +39,14 @@ import {
 import {
   queryTeamworkGraph,
   queryFacilityDrainageDependencies,
+  fetchTeamworkGraphContext,
+  fetchRelatedContext,
   AUTHORITATIVE_GRAPH_NODES,
   AUTHORITATIVE_GRAPH_EDGES
 } from './teamworkGraph.js';
 import { publishAuditToConfluence } from './confluenceAudit.js';
+import { getGovernanceSettings, saveGovernanceSettings, createSampleFloodIncident } from './governanceSettings.js';
+import { handleIssueCreatedTrigger, proactiveTriggerHandler, isFloodIncidentText } from './proactiveTrigger.js';
 
 export {
   recordDecision,
@@ -74,9 +78,12 @@ export {
   buildRovoEngineeringExplanation,
   queryTeamworkGraph,
   queryFacilityDrainageDependencies,
+  fetchTeamworkGraphContext, fetchRelatedContext,
   AUTHORITATIVE_GRAPH_NODES,
   AUTHORITATIVE_GRAPH_EDGES,
-  publishAuditToConfluence
+  publishAuditToConfluence,
+  getGovernanceSettings, saveGovernanceSettings, createSampleFloodIncident,
+  handleIssueCreatedTrigger, proactiveTriggerHandler, isFloodIncidentText
 };
 
 function resolveResolverConstructor(mod) {
@@ -438,11 +445,16 @@ resolver.define('queryTeamworkGraph', async (req) => {
   return result;
 });
 resolver.define('queryFacilityDrainageDependencies', async (req) => await queryFacilityDrainageDependencies(req?.payload?.facilityId || req?.facilityId, { context: req?.context }));
+resolver.define('queryRelatedContext', async (req) => { const projectKey = req?.context?.extension?.project?.key || null; const twg = await fetchTeamworkGraphContext({}); const rel = await fetchRelatedContext(projectKey, {}); return { success: true, nodes: [...twg.nodes, ...rel.nodes], liveStatus: `${twg.liveStatus}+${rel.liveStatus}` }; });
 resolver.define('publishAuditToConfluence', async (req) => {
   const result = await publishAuditToConfluence(req?.payload || req, { context: req?.context });
   console.info('[DELTA] publishAuditToConfluence', { spaceKey: result?.spaceKey || null, success: result?.success === true, pageId: result?.pageId || null });
   return result;
 });
+resolver.define('getGovernanceSettings', async () => await getGovernanceSettings());
+resolver.define('saveGovernanceSettings', async (req) => await saveGovernanceSettings(req?.payload || req));
+resolver.define('createSampleFloodIncident', async (req) => await createSampleFloodIncident(req?.payload || req, { context: req?.context }));
+resolver.define('getSimulationSnapshotForPanel', async () => { const s = await getSimulationStatus(); const e = await evaluateInterventions(); return { success: true, simulation: s, evaluation: e }; });
 
 const customUiHandler = resolver.getDefinitions();
 
@@ -518,6 +530,11 @@ export async function handler(event, context) {
     case 'query-facility-dependencies':
     case 'queryFacilityDrainageDependencies':
       return await queryFacilityDrainageDependencies(payload.facilityId, { context: effectiveContext });
+
+    case 'query-related-context':
+    case 'queryRelatedContext': {
+      const twg = await fetchTeamworkGraphContext({}); const rel = await fetchRelatedContext(null, {}); return { success: true, nodes: [...twg.nodes, ...rel.nodes], liveStatus: `${twg.liveStatus}+${rel.liveStatus}` };
+    }
 
     case 'publish-audit-to-confluence':
     case 'publishAuditToConfluence':

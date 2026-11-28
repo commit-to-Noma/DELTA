@@ -70,6 +70,11 @@ export async function invokeSafe(functionKey: string, payload?: any): Promise<an
     }
   }
 
+  if (functionKey === 'getGovernanceSettings') { try { const s = localStorage.getItem('delta_governance_settings'); return { success: true, data: s ? JSON.parse(s) : { commanderRole: 'Incident Commanders', dispatchIssueType: 'Task', confluenceSpaceKey: '', proactiveTriggerEnabled: true } }; } catch { return { success: true, data: null }; } }
+  if (functionKey === 'saveGovernanceSettings') { try { localStorage.setItem('delta_governance_settings', JSON.stringify(payload)); } catch {} return { success: true, data: payload }; }
+  if (functionKey === 'createSampleFloodIncident') { return { success: false, status: 'OFFLINE_NO_FORGE_RUNTIME', message: 'Sample incident creation requires the Forge runtime. Open DELTA inside Jira and retry.' }; }
+  if (functionKey === 'getSimulationSnapshotForPanel') { return { success: true, simulation: { status: 'NO_RUN' }, evaluation: { status: 'NO_RUN' } }; }
+
   if (functionKey === 'createDispatchTicket' || functionKey === 'dispatchFieldTeam') {
     return { success: false, error: { code: 'DISPATCH_UNAVAILABLE_OUTSIDE_FORGE', message: 'Live dispatch requires a Forge runtime with Jira access. No Jira issue was created outside Forge.' } };
   }
@@ -174,15 +179,12 @@ export async function getContextSafe(): Promise<any> {
   // Standalone browser preview parameters
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const isPanel = params?.get('view') === 'panel';
-  const issueKey = params?.get('issue') || 'EMERG-101';
+  const issueKey = params?.get('issue') || '';
 
   return {
     extension: {
       type: isPanel ? 'jira:issuePanel' : 'jira:projectPage',
-      issue: {
-        key: issueKey,
-        id: '10001'
-      }
+      issue: issueKey ? { key: issueKey, id: '' } : undefined
     }
   };
 }

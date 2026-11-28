@@ -39,3 +39,13 @@ In the target project, optionally create a project role named `Incident Commande
 ```bash
 npm run lint && npm test && npm run build && forge lint
 ```
+
+## Championship upgrades (Codegeist 2025)
+Full plan: `docs/competition/championship-upgrades.md`. In one line each:
+1. **Click-Anywhere Sandbox** (Simulation screen): enable, pick Pump/Barrier/Blockage + strength + rainfall scale, click any cell — the real 2D solver recomputes and reports avoided volume + adverse cells (screening representation). Golden Journey is untouched unless you place an action.
+2. **Proactive trigger + panel snapshot**: creating a flood/drainage Jira issue posts one deduped DELTA risk comment (honest `NO_RUN` if no run is stored); the issue panel shows a compact flood-impact snapshot with a deep link back to the DELTA Engine.
+3. **Teamwork Graph + related context**: live Jira nodes plus best-effort Teamwork Graph / Confluence runbook / Compass context (`query-related-context`); unavailable sources report `*_UNAVAILABLE`, never fabricated nodes.
+4. **Governance Settings + judge seed**: header **Settings** drawer (Forge KVS) with commander role, dispatch issue type, Confluence space, trigger toggle — and **Create Sample Flood Incident** for a 30-second fresh-site test.
+5. **External `rovo:mcp` proof**: exact tool keys are in `mcp/SKILL.md`; `node scripts/verify-rovo-mcp.mjs` prints the 20-second external-agent (Copilot/Claude/Cursor) verification sequence to record for the demo video.
+
+> Demo truth note: on the stored NOAA run the solver ranks **Plan Beta** first — the demo script follows the solver, and every number shown comes from a solver run or Forge KVS.

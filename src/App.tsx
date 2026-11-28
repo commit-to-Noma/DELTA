@@ -16,7 +16,7 @@ export const App: React.FC = () => {
     : 'app';
 
   const [currentMode, setCurrentMode] = useState<'landing' | 'app' | 'panel'>(initialMode);
-  const [activeIssueKey, setActiveIssueKey] = useState<string>('EMERG-101');
+  const [activeIssueKey, setActiveIssueKey] = useState<string>('');
 
   useEffect(() => {
     async function checkForgeContext() {

@@ -72,8 +72,13 @@ export const FloodSimulationView: React.FC = () => {
     selectedRoadId,
     setSelectedRoadId,
     selectedFacilityId,
-    setSelectedFacilityId
+    setSelectedFacilityId,
+    customActions, addCustomAction, removeCustomAction, undoCustomAction, clearCustomActions,
+    sandboxRainfallScale, setSandboxRainfallScale, sandboxResult, isComputingSandbox, resetGoldenJourney
   } = useIncidentWorkspace();
+  const [sandboxEnabled, setSandboxEnabled] = useState(false);
+  const [sandboxTool, setSandboxTool] = useState<'PUMP' | 'BARRIER' | 'BLOCKAGE'>('PUMP');
+  const [sandboxStrength, setSandboxStrength] = useState(2);
 
   const { nx, ny } = dataset.metadata.grid;
 
@@ -190,7 +195,9 @@ export const FloodSimulationView: React.FC = () => {
   // Water arrays bound to the canvas
   const zeroDepth = useMemo(() => new Float64Array(nx * ny), [nx, ny]);
   const canvasWaterDepth =
-    stageMode === 'disruption-analysis'
+    sandboxEnabled && sandboxResult
+      ? sandboxResult.custom.waterDepth
+      : stageMode === 'disruption-analysis'
       ? disruptionComparison?.disrupted.waterDepth ?? zeroDepth
       : simState.waterDepth;
 
@@ -396,10 +403,12 @@ export const FloodSimulationView: React.FC = () => {
               selectedRoadId={selectedRoadId}
               selectedFacilityId={selectedFacilityId}
               stagedWorkOrders={workOrders}
+              customActions={customActions}
               onCellHover={setHoveredCell}
               onCellClick={(info) => {
                 setClickedCell(info);
                 setSelectedCell({ row: info.row, col: info.col });
+                if (sandboxEnabled) addCustomAction({ id: `custom-${sandboxTool.toLowerCase()}-${info.row}-${info.col}`, row: info.row, col: info.col, type: sandboxTool, strength: sandboxStrength });
               }}
               onSelectFacility={(fac) => setSelectedFacilityId(fac ? fac.facilityId : null)}
               onSelectRoad={(road) => setSelectedRoadId(road ? road.roadId : null)}
@@ -450,6 +459,27 @@ export const FloodSimulationView: React.FC = () => {
 
         {/* Right Contextual Disruption Controls & Telemetry Rail */}
         <div className="xl:col-span-4 flex flex-col gap-3 overflow-y-auto pr-0.5">
+          <div className="bg-onyx-900 border border-cyan-800/60 rounded p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-white">Click-Anywhere Sandbox</span>
+              <button type="button" onClick={() => setSandboxEnabled(v => !v)} aria-pressed={sandboxEnabled} className={`px-2 py-1 rounded text-[10px] font-mono font-bold ${sandboxEnabled ? 'bg-cyan-600 text-white' : 'bg-onyx-800 text-storm-300'}`}>{sandboxEnabled ? 'ON — click map' : 'OFF'}</button>
+            </div>
+            <p className="text-[11px] text-storm-400 leading-snug">Golden Journey stays 1-click above. Turn sandbox ON, pick a tool, then click any map cell. Pump = point sink, barrier = raised cells, blockage = raised impermeable block (screening representations).</p>
+            <div className="flex gap-1.5" role="group" aria-label="Sandbox tool">
+              {(['PUMP', 'BARRIER', 'BLOCKAGE'] as const).map(t => (
+                <button key={t} type="button" onClick={() => { setSandboxTool(t); setSandboxStrength(t === 'PUMP' ? 2 : t === 'BARRIER' ? 0.5 : 0.4); }} className={`px-2 py-1 rounded text-[10px] font-mono ${sandboxTool === t ? 'bg-safety-orange text-white font-bold' : 'bg-onyx-950 text-storm-300 border border-onyx-700'}`}>{t}</button>
+              ))}
+            </div>
+            <label className="block text-[10px] font-mono text-storm-400">Strength: {sandboxStrength} <input type="range" min={sandboxTool === 'PUMP' ? 0.5 : 0.2} max={sandboxTool === 'PUMP' ? 4 : sandboxTool === 'BARRIER' ? 1 : 0.6} step={0.1} value={sandboxStrength} onChange={e => setSandboxStrength(Number(e.target.value))} className="w-full" aria-label="Sandbox strength" /></label>
+            <label className="block text-[10px] font-mono text-storm-400">Rainfall ×{sandboxRainfallScale.toFixed(1)} <input type="range" min={0.5} max={1.5} step={0.1} value={sandboxRainfallScale} onChange={e => setSandboxRainfallScale(Number(e.target.value))} className="w-full" aria-label="Sandbox rainfall scale" /></label>
+            {customActions.length > 0 && <div className="space-y-1">{customActions.map(a => <div key={a.id} className="flex justify-between text-[10px] font-mono bg-onyx-950 rounded px-2 py-1"><span>{a.type} [{a.row},{a.col}] · {a.strength}</span><button type="button" onClick={() => removeCustomAction(a.id)} className="text-red-300">Remove</button></div>)}</div>}
+            <div className="flex gap-2 text-[10px] font-mono">
+              <button type="button" onClick={undoCustomAction} className="underline text-storm-300">Undo</button>
+              <button type="button" onClick={clearCustomActions} className="underline text-storm-300">Clear sandbox</button>
+              <button type="button" onClick={resetGoldenJourney} className="underline text-cyan-300">Reset Golden Journey</button>
+            </div>
+            <div className="text-[11px] font-mono text-cyan-200" role="status">{isComputingSandbox ? 'Sandbox recalculating on the 2D solver (can take about a minute first time)…' : sandboxResult ? sandboxResult.summary : 'No sandbox result yet.'}</div>
+          </div>
           {/* 1. Physical Drainage Disruption Configuration (Synchronized across entire app) */}
           <div className="bg-onyx-900 border border-onyx-800 rounded p-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-2">

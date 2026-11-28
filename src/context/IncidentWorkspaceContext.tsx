@@ -41,6 +41,7 @@ import {
   SpatialDisruptionComparisonResult
 } from '../simulation/disruptionEngine';
 import { computeScenarioHash } from '../simulation/decisionBriefingEngine';
+import { CustomAction, CustomSandboxResult, executeCustomSandboxAsync, validateCustomAction } from '../simulation/customSandbox';
 import {
   getStoredWorkOrders,
   OperationalWorkOrder
@@ -186,6 +187,16 @@ export interface IncidentWorkspaceContextValue {
   setSelectedFacilityId: (id: string | null) => void;
   selectedWorkOrderId: string | null;
   setSelectedWorkOrderId: (id: string | null) => void;
+  customActions: CustomAction[];
+  addCustomAction: (a: CustomAction) => void;
+  removeCustomAction: (id: string) => void;
+  undoCustomAction: () => void;
+  clearCustomActions: () => void;
+  sandboxRainfallScale: number;
+  setSandboxRainfallScale: (v: number) => void;
+  sandboxResult: CustomSandboxResult | null;
+  isComputingSandbox: boolean;
+  resetGoldenJourney: () => void;
 }
 
 const IncidentWorkspaceContext = createContext<IncidentWorkspaceContextValue | null>(null);
@@ -237,6 +248,17 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
   const [selectedRoadId, setSelectedRoadId] = useState<string | null>(null);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState<string | null>(null);
+  const [customActions, setCustomActions] = useState<CustomAction[]>([]);
+  const [sandboxRainfallScale, setSandboxRainfallScale] = useState<number>(1);
+  const [sandboxResult, setSandboxResult] = useState<CustomSandboxResult | null>(null);
+  const [isComputingSandbox, setIsComputingSandbox] = useState<boolean>(false);
+  const sandboxKeyRef = useRef<string>('');
+
+  const addCustomAction = useCallback((a: CustomAction) => { const v = validateCustomAction(a); setCustomActions(prev => [...prev.filter(x => x.id !== v.id), v].slice(-12)); }, []);
+  const removeCustomAction = useCallback((id: string) => setCustomActions(prev => prev.filter(x => x.id !== id)), []);
+  const undoCustomAction = useCallback(() => setCustomActions(prev => prev.slice(0, -1)), []);
+  const clearCustomActions = useCallback(() => setCustomActions([]), []);
+  const resetGoldenJourney = useCallback(() => { setCustomActions([]); setSandboxRainfallScale(1); setActiveProfileIdState('reference-noaa-50yr'); setActiveDisruptionIdsState(['disruption-brookline-culvert']); setSelectedPlanId('plan-gamma'); }, []);
 
   const activeProfile: StressProfile =
     AUTHORITATIVE_STRESS_PROFILES[activeProfileId] || AUTHORITATIVE_STRESS_PROFILES['reference-noaa-50yr'];
@@ -267,6 +289,17 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
     currentDisruptionEntry && currentDisruptionEntry.configKey === scenarioConfigKey
       ? currentDisruptionEntry.result
       : null;
+
+  useEffect(() => {
+    if (activeStage !== 'simulation' || customActions.length === 0) { if (customActions.length === 0) setSandboxResult(null); return; }
+    const key = `${scenarioConfigKey}::${sandboxRainfallScale}::${customActions.map(a => `${a.type}:${a.row}:${a.col}:${a.strength}`).join('|')}`;
+    if (sandboxKeyRef.current === key && sandboxResult) return;
+    sandboxKeyRef.current = key; setIsComputingSandbox(true);
+    let cancelled = false;
+    executeCustomSandboxAsync(dataset, activeProfile, activeDisruptionIds, customActions, sandboxRainfallScale)
+      .then(r => { if (!cancelled) setSandboxResult(r); }).catch(() => { if (!cancelled) setSandboxResult(null); }).finally(() => { if (!cancelled) setIsComputingSandbox(false); });
+    return () => { cancelled = true; };
+  }, [activeStage, customActions, sandboxRainfallScale, scenarioConfigKey, dataset, activeProfile, activeDisruptionIds, sandboxResult]);
 
   // Deterministic solver execution for active profile + disruptions
   const runEvaluationForActiveConfig = useCallback(
@@ -517,7 +550,9 @@ export const IncidentWorkspaceProvider: React.FC<{ children: React.ReactNode }> 
     selectedFacilityId,
     setSelectedFacilityId,
     selectedWorkOrderId,
-    setSelectedWorkOrderId
+    setSelectedWorkOrderId,
+    customActions, addCustomAction, removeCustomAction, undoCustomAction, clearCustomActions,
+    sandboxRainfallScale, setSandboxRainfallScale, sandboxResult, isComputingSandbox, resetGoldenJourney
   };
 
   return (
