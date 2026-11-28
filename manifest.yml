@@ -46,6 +46,11 @@ modules:
         trade-offs regarding hospital route accessibility. You never approve or
         dispatch operational tasks autonomously; human incident commanders hold
         approval authority.
+      conversationStarters:
+        - What is the current flood simulation status for Boston Longwood?
+        - Compare the flood interventions for the active storm and explain the trade-offs.
+        - Show me the latest approved DELTA decision records.
+        - Which hospital access roads are at risk if the Brookline culvert is blocked?
       actions:
         - get-simulation-status
         - evaluate-interventions

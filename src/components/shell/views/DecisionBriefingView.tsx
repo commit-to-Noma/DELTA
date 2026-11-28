@@ -33,7 +33,8 @@ import {
   RefreshCw,
   AlertOctagon
 } from 'lucide-react';
-import { AUTHORITATIVE_STRESS_PROFILES } from '../../../simulation/interventionEngine';
+import { AUTHORITATIVE_STRESS_PROFILES, plainStormHint, plainStormLabel } from '../../../simulation/interventionEngine';
+import { StageIntro } from '../../common/StageIntro';
 import {
   generateDecisionBriefing,
   getOrComputeCrossProfileMatrix,
@@ -132,6 +133,7 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
 
   return (
     <div className="flex flex-col gap-3 h-full">
+      <StageIntro subtitle="Read the approved decision in plain language, check the evidence, then publish or export the briefing." />
       {/* Compact Top Briefing Header */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
@@ -245,10 +247,11 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
           >
             {Object.values(AUTHORITATIVE_STRESS_PROFILES).map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {plainStormLabel(p)} — {p.name}
               </option>
             ))}
           </select>
+          <span className="hidden 2xl:inline text-[10px] text-cyan-200 max-w-[200px]">{plainStormHint(AUTHORITATIVE_STRESS_PROFILES[activeProfileId])}</span>
 
           <button
             type="button"

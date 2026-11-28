@@ -31,6 +31,7 @@ import {
 } from '../../../simulation/workOrderEngine';
 import { invokeSafe } from '../../../services/forgeBridge';
 import { useIncidentWorkspace } from '../../../context/IncidentWorkspaceContext';
+import { StageIntro } from '../../common/StageIntro';
 
 export const OperationalTicketsView: React.FC = () => {
   const {
@@ -226,6 +227,12 @@ export const OperationalTicketsView: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <StageIntro subtitle="Turn an approved decision into a work order, stage it, then dispatch it to Jira." />
+        <button type="button" onClick={() => setActiveStage('interventions')} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white text-xs font-mono font-bold">
+          Approve a new decision <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
       {/* Notice Banner */}
       <div className="bg-onyx-900 border-l-4 border-cyan-500 p-4 rounded-r border-y border-r border-onyx-800 flex items-start gap-3">
         <Ticket className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />

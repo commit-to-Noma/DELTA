@@ -18,15 +18,14 @@ import {
   Hospital,
   Route,
   Droplets,
-  ChevronDown,
-  ChevronUp,
-  Database,
   Compass,
   RefreshCw,
   Info
 } from 'lucide-react';
 import { useIncidentWorkspace } from '../../../context/IncidentWorkspaceContext';
-import { AUTHORITATIVE_STRESS_PROFILES } from '../../../simulation/interventionEngine';
+import { AUTHORITATIVE_STRESS_PROFILES, plainStormHint, plainStormLabel } from '../../../simulation/interventionEngine';
+import { StageIntro } from '../../common/StageIntro';
+import { DataModelSpecsDrawer } from '../../common/DataModelSpecsDrawer';
 import {
   GeographicSimulationCanvas,
   CellHoverInfo
@@ -63,7 +62,6 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
 
   const [hoveredCell, setHoveredCell] = useState<CellHoverInfo | null>(null);
   const [clickedCell, setClickedCell] = useState<CellHoverInfo | null>(null);
-  const [showProvenanceDrawer, setShowProvenanceDrawer] = useState<boolean>(false);
 
   const { nx, ny, dx, totalAreaKm2 } = dataset.metadata.grid;
   const { minElevationM, maxElevationM, meanElevationM } = dataset.metadata.elevationStatistics;
@@ -95,6 +93,7 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
 
   return (
     <div className="flex flex-col gap-3 h-full">
+      <StageIntro subtitle="Look at the map, pick a storm, then enter the simulation to see which hospital roads flood." />
       {/* Compact Top Catchment & Scenario Summary Strip */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -104,18 +103,15 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
               <h1 className="text-sm font-bold text-white leading-tight">
                 {dataset.catchmentName}
               </h1>
-              <div className="text-[11px] font-mono text-storm-400">
-                {dataset.metadata.spatialReference.authoritativeProjectedCRS} · {bounds.widthM}m × {bounds.heightM}m ({nx}×{ny} @ {dx.toFixed(1)}m) · {totalAreaKm2} km²
-              </div>
+              <p className="text-[11px] text-storm-300">
+                Five hospitals beside the Muddy River floodplain — one storm can cut their access roads.
+              </p>
             </div>
           </div>
 
           <div className="hidden xl:block h-6 w-[1px] bg-onyx-800" />
 
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
-            <span className="px-2 py-0.5 rounded bg-onyx-950 border border-onyx-800 text-storm-300">
-              DEM: {minElevationM.toFixed(1)}m – {maxElevationM.toFixed(1)}m NAVD88
-            </span>
             <span className="px-2 py-0.5 rounded bg-onyx-950 border border-onyx-800 text-cyan-300">
               {dataset.criticalFacilities.length} Medical Campuses
             </span>
@@ -260,10 +256,11 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
             >
               {Object.values(AUTHORITATIVE_STRESS_PROFILES).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {plainStormLabel(p)} — {p.name}
                 </option>
               ))}
             </select>
+            <p className="text-[11px] text-cyan-200">{plainStormHint(activeProfile)}</p>
 
             <div className="grid grid-cols-3 gap-2 text-[11px] font-mono">
               <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
@@ -319,6 +316,7 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
                       <span>{Math.round(d.blockageRatio * 100)}% Blocked</span>
                     </div>
                     <div className="text-storm-300 mt-0.5">{d.name}</div>
+                    {d.plainConsequence && <div className="text-storm-200 mt-0.5">{d.plainConsequence}</div>}
                     <div className="text-[10px] font-mono text-storm-400 mt-0.5">
                       Cell [{d.gridCell[0]}, {d.gridCell[1]}] · {d.nominalCapacityM3PerSec} → {d.effectiveCapacityM3PerSec} m³/s modelled sink
                     </div>
@@ -410,43 +408,23 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
             </div>
           </div>
 
-          {/* 4. Collapsible Engineering Provenance & Limitations Drawer */}
-          <div className="bg-onyx-900 border border-onyx-800 rounded">
-            <button
-              type="button"
-              onClick={() => setShowProvenanceDrawer((v) => !v)}
-              className="w-full px-3.5 py-2.5 flex items-center justify-between text-[11px] font-mono text-storm-300 hover:text-white"
-            >
-              <span className="flex items-center gap-1.5 uppercase tracking-wider font-bold">
-                <Database className="w-3.5 h-3.5 text-storm-400" />
-                Dataset Provenance &amp; Model Scope
-              </span>
-              {showProvenanceDrawer ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-
-            {showProvenanceDrawer && (
-              <div className="px-3.5 pb-3.5 pt-1 border-t border-onyx-800 space-y-2 text-[11px] text-storm-300">
-                <div>
-                  <span className="font-mono text-[10px] text-storm-400 uppercase block">Topography</span>
-                  <span>{dataset.attribution.topography} (Mean elev: {meanElevationM.toFixed(2)}m)</span>
-                </div>
-                <div>
-                  <span className="font-mono text-[10px] text-storm-400 uppercase block">Infrastructure</span>
-                  <span>{dataset.attribution.infrastructure}</span>
-                </div>
-                <div>
-                  <span className="font-mono text-[10px] text-storm-400 uppercase block">Drainage Abstraction</span>
-                  <span>
-                    CULVERT-01-BROOKLINE is modelled as an exploratory road-deck point sink on cell [17, 26] (12.5 m³/s screening heuristic), not a coupled 1D culvert barrel.
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 text-[10px] font-mono text-storm-400 pt-1">
-                  <Compass className="w-3 h-3" />
-                  <span>Screening outputs require field reconnaissance before any operational dispatch.</span>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* 4. Collapsible Data & Model Specs drawer (engineering strings moved here, nothing deleted) */}
+          <DataModelSpecsDrawer
+            items={[
+              { label: 'Catchment', value: `${dataset.catchmentName} · ${bounds.widthM}m × ${bounds.heightM}m (${nx}×${ny} @ ${dx.toFixed(1)}m) · ${totalAreaKm2} km²` },
+              { label: 'Coordinate System', value: dataset.metadata.spatialReference.authoritativeProjectedCRS },
+              { label: 'Elevation (DEM)', value: `${minElevationM.toFixed(1)}m – ${maxElevationM.toFixed(1)}m NAVD88 · Mean ${meanElevationM.toFixed(2)}m` },
+              { label: 'Topography', value: dataset.attribution.topography },
+              { label: 'Infrastructure', value: dataset.attribution.infrastructure },
+              { label: 'Rainfall Provenance', value: activeProfile.provenance },
+              { label: 'Drainage Abstraction', value: 'CULVERT-01-BROOKLINE is modelled as an exploratory road-deck point sink on cell [17, 26] (12.5 m³/s screening heuristic), not a coupled 1D culvert barrel.' }
+            ]}
+          >
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-storm-400 pt-1">
+              <Compass className="w-3 h-3" />
+              <span>Screening outputs require field reconnaissance before any operational dispatch.</span>
+            </div>
+          </DataModelSpecsDrawer>
         </div>
       </div>
     </div>

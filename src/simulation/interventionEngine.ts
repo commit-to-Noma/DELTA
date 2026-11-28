@@ -346,6 +346,24 @@ export const AUTHORITATIVE_STRESS_PROFILES: Record<string, StressProfile> = {
   }
 };
 
+const PLAIN_STORM_BY_ID: Record<string, { label: string; hint: string }> = {
+  'synthetic-low-intensity': { label: 'Light · 15 mm/h', hint: 'Light rain — minor ponding, most roads stay passable.' },
+  'synthetic-moderate-stress': { label: 'Moderate · 35 mm/h', hint: 'Moderate rain — low spots and hospital access roads can pond.' },
+  'synthetic-high-intensity': { label: 'Severe · 75 mm/h', hint: 'Severe burst — rapid ponding, some corridors may become impassable.' },
+  'reference-noaa-50yr': { label: '50-Year Storm · 104 mm', hint: '50-year benchmark (NOAA) — worst-case planning storm, deep widespread flooding.' }
+};
+
+export function plainStormLabel(profile: Pick<StressProfile, 'id' | 'totalRainfallMm' | 'rainfallIntensityMmPerHour'>): string {
+  const known = PLAIN_STORM_BY_ID[profile.id];
+  if (known) return known.label;
+  const rate = profile.rainfallIntensityMmPerHour ?? profile.totalRainfallMm;
+  return `${rate.toFixed(0)} mm/h · ${profile.totalRainfallMm.toFixed(0)} mm total`;
+}
+
+export function plainStormHint(profile: Pick<StressProfile, 'id'>): string {
+  return PLAIN_STORM_BY_ID[profile.id]?.hint ?? 'Planning scenario — watch low-lying hospital access roads first.';
+}
+
 /**
  * Computes instantaneous rainfall intensity (mm/h) at a specific elapsed simulation time.
  */

@@ -33,8 +33,11 @@ import {
   AUTHORITATIVE_INTERVENTIONS,
   AUTHORITATIVE_STRESS_PROFILES,
   EffectivenessClassification,
-  InterventionDefinition
+  InterventionDefinition,
+  plainStormHint,
+  plainStormLabel
 } from '../../../simulation/interventionEngine';
+import { StageIntro } from '../../common/StageIntro';
 import { useIncidentWorkspace, PlanId } from '../../../context/IncidentWorkspaceContext';
 import { invokeSafe } from '../../../services/forgeBridge';
 import {
@@ -278,6 +281,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
 
   return (
     <div className="flex flex-col gap-3 h-full">
+      <StageIntro subtitle="Compare the three fixes side by side, pick the one that keeps hospital roads open, then approve it." />
       {/* Compact Top Scenario & Plan Selection Strip */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
@@ -293,10 +297,11 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
             >
               {Object.values(AUTHORITATIVE_STRESS_PROFILES).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {plainStormLabel(p)} — {p.name}
                 </option>
               ))}
             </select>
+            <span className="hidden 2xl:inline text-[10px] text-cyan-200 max-w-[200px]">{plainStormHint(activeProfile)}</span>
           </div>
 
           {/* Active Disruption State Pill (Linked to Stage 02) */}

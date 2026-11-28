@@ -29,6 +29,7 @@ export interface DisruptionScenario {
   gridCell: [number, number];
   blockageRatio: number; // 0.0 (open) to 1.0 (fully blocked)
   description: string;
+  plainConsequence?: string;
   nominalCapacityM3PerSec: number;
   effectiveCapacityM3PerSec: number;
 }
@@ -117,7 +118,8 @@ export const AUTHORITATIVE_DISRUPTIONS: DisruptionScenario[] = [
     blockageRatio: 1.0, // 100% complete debris choke
     nominalCapacityM3PerSec: 12.5,
     effectiveCapacityM3PerSec: 0.0,
-    description: 'Upstream urban debris and fallen limbs choke the Brookline Avenue conduit grating, cutting off 100% of gravitational culvert conveyance.'
+    description: 'Upstream urban debris and fallen limbs choke the Brookline Avenue conduit grating, cutting off 100% of gravitational culvert conveyance.',
+    plainConsequence: 'Blocks drainage toward Brigham & Women’s and BIDMC — water on Brookline Ave rises first.'
   },
   {
     id: 'disruption-fenway-choke',
@@ -129,7 +131,8 @@ export const AUTHORITATIVE_DISRUPTIONS: DisruptionScenario[] = [
     blockageRatio: 0.75, // 75% constriction
     nominalCapacityM3PerSec: 8.0,
     effectiveCapacityM3PerSec: 2.0,
-    description: 'Backwater constriction along the Fenway channel neck restricts discharge conveyance into the lower Charles basin to 2.0 m³/s.'
+    description: 'Backwater constriction along the Fenway channel neck restricts discharge conveyance into the lower Charles basin to 2.0 m³/s.',
+    plainConsequence: 'Slows the Muddy River outflow — the Fenway and Park Drive area ponds earlier.'
   },
   {
     id: 'disruption-sump-loss',
@@ -141,7 +144,8 @@ export const AUTHORITATIVE_DISRUPTIONS: DisruptionScenario[] = [
     blockageRatio: 1.0, // 100% loss
     nominalCapacityM3PerSec: 4.5,
     effectiveCapacityM3PerSec: 0.0,
-    description: 'Total loss of gravity catch basin conveyance in the southern Longwood depression, trapping 100% of local surface runoff.'
+    description: 'Total loss of gravity catch basin conveyance in the southern Longwood depression, trapping 100% of local surface runoff.',
+    plainConsequence: 'Traps runoff in the low Longwood basin — southern hospital access roads pond first.'
   }
 ];
 

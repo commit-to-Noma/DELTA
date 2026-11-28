@@ -370,37 +370,10 @@ const AppShellInner: React.FC<AppShellProps> = ({ onExitToLanding }) => {
 
         {/* Main Workspace Canvas Container */}
         <main className="flex-1 overflow-y-auto bg-onyx-950 flex flex-col">
-          {/* Compact Stage Progression Rail */}
-          <div className="px-4 py-2 border-b border-onyx-850 bg-onyx-900/40 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono flex-shrink-0">
-            <div className="flex items-center gap-1.5 overflow-x-auto">
-              {PRIMARY_STAGES.map((stage, idx) => {
-                const isActive = activeStage === stage.id;
-                return (
-                  <React.Fragment key={stage.id}>
-                    <button
-                      type="button"
-                      onClick={() => setActiveStage(stage.id)}
-                      className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
-                        isActive
-                          ? 'bg-safety-orange/20 border border-safety-orange/50 text-white font-bold'
-                          : 'text-storm-400 hover:text-storm-200'
-                      }`}
-                    >
-                      {stage.code} {stage.shortLabel}
-                    </button>
-                    {idx < PRIMARY_STAGES.length - 1 && (
-                      <span className="text-onyx-700">→</span>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center gap-3 text-storm-400">
-              <span className="uppercase hidden sm:inline">
-                {currentStageInfo.label}
-              </span>
-            </div>
+          {/* Current stage label only — navigation lives solely in the sidebar (deduped) */}
+          <div className="px-4 py-1.5 border-b border-onyx-850 bg-onyx-900/40 flex items-center justify-between gap-2 text-[11px] font-mono flex-shrink-0">
+            <span className="uppercase text-storm-300 font-bold">{currentStageInfo.label}</span>
+            <span className="text-storm-500 hidden sm:inline">Use the sidebar to move between stages</span>
           </div>
 
           {/* Active Stage View */}

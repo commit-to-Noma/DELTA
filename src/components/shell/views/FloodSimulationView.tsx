@@ -41,8 +41,11 @@ import {
 import { AUTHORITATIVE_DISRUPTIONS } from '../../../simulation/disruptionEngine';
 import {
   AUTHORITATIVE_STRESS_PROFILES,
-  getRainfallRateAtElapsed
+  getRainfallRateAtElapsed,
+  plainStormHint,
+  plainStormLabel
 } from '../../../simulation/interventionEngine';
+import { StageIntro } from '../../common/StageIntro';
 import { useIncidentWorkspace } from '../../../context/IncidentWorkspaceContext';
 import {
   GeographicSimulationCanvas,
@@ -77,6 +80,7 @@ export const FloodSimulationView: React.FC = () => {
     sandboxRainfallScale, setSandboxRainfallScale, sandboxResult, isComputingSandbox, resetGoldenJourney
   } = useIncidentWorkspace();
   const [sandboxEnabled, setSandboxEnabled] = useState(false);
+  const [showAllSandboxActions, setShowAllSandboxActions] = useState(false);
   const [sandboxTool, setSandboxTool] = useState<'PUMP' | 'BARRIER' | 'BLOCKAGE'>('PUMP');
   const [sandboxStrength, setSandboxStrength] = useState(2);
 
@@ -226,6 +230,7 @@ export const FloodSimulationView: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-3 h-full">
+      <StageIntro subtitle="Pick a storm and tick any blocked drains — the map shows where the water goes. Try the sandbox to test your own pumps and barriers." />
       {/* Compact Command Controls Bar */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
@@ -269,10 +274,11 @@ export const FloodSimulationView: React.FC = () => {
             >
               {Object.values(AUTHORITATIVE_STRESS_PROFILES).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {plainStormLabel(p)} — {p.name}
                 </option>
               ))}
             </select>
+            <span className="hidden 2xl:inline text-[10px] text-cyan-200 max-w-[220px]">{plainStormHint(activeProfile)}</span>
           </div>
         </div>
 
@@ -472,13 +478,22 @@ export const FloodSimulationView: React.FC = () => {
             </div>
             <label className="block text-[10px] font-mono text-storm-400">Strength: {sandboxStrength} <input type="range" min={sandboxTool === 'PUMP' ? 0.5 : 0.2} max={sandboxTool === 'PUMP' ? 4 : sandboxTool === 'BARRIER' ? 1 : 0.6} step={0.1} value={sandboxStrength} onChange={e => setSandboxStrength(Number(e.target.value))} className="w-full" aria-label="Sandbox strength" /></label>
             <label className="block text-[10px] font-mono text-storm-400">Rainfall ×{sandboxRainfallScale.toFixed(1)} <input type="range" min={0.5} max={1.5} step={0.1} value={sandboxRainfallScale} onChange={e => setSandboxRainfallScale(Number(e.target.value))} className="w-full" aria-label="Sandbox rainfall scale" /></label>
-            {customActions.length > 0 && <div className="space-y-1">{customActions.map(a => <div key={a.id} className="flex justify-between text-[10px] font-mono bg-onyx-950 rounded px-2 py-1"><span>{a.type} [{a.row},{a.col}] · {a.strength}</span><button type="button" onClick={() => removeCustomAction(a.id)} className="text-red-300">Remove</button></div>)}</div>}
+            <div className="text-[11px] font-mono text-cyan-200 bg-onyx-950 border border-cyan-800/50 rounded px-2 py-1.5" role="status">{isComputingSandbox ? 'Sandbox recalculating on the 2D solver (can take about a minute first time)…' : sandboxResult ? sandboxResult.summary : 'No sandbox result yet.'}</div>
+            {customActions.length > 0 && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[10px] font-mono">
+                  <span className="text-storm-200 font-bold">{customActions.length} sandbox action{customActions.length === 1 ? '' : 's'} · showing {showAllSandboxActions ? 'all' : `latest ${Math.min(3, customActions.length)}`}</span>
+                  <button type="button" onClick={clearCustomActions} className="px-2 py-0.5 rounded bg-red-900/60 border border-red-700 text-red-100 font-bold">Clear all</button>
+                </div>
+                {(showAllSandboxActions ? customActions : customActions.slice(-3)).map(a => <div key={a.id} className="flex justify-between text-[10px] font-mono bg-onyx-950 rounded px-2 py-1"><span>{a.type} [{a.row},{a.col}] · {a.strength}</span><button type="button" onClick={() => removeCustomAction(a.id)} className="text-red-300">Remove</button></div>)}
+                {customActions.length > 3 && <button type="button" onClick={() => setShowAllSandboxActions(v => !v)} className="text-[10px] font-mono underline text-cyan-300">{showAllSandboxActions ? 'Show latest 3 only' : `Show all ${customActions.length} actions`}</button>}
+              </div>
+            )}
             <div className="flex gap-2 text-[10px] font-mono">
               <button type="button" onClick={undoCustomAction} className="underline text-storm-300">Undo</button>
               <button type="button" onClick={clearCustomActions} className="underline text-storm-300">Clear sandbox</button>
               <button type="button" onClick={resetGoldenJourney} className="underline text-cyan-300">Reset Golden Journey</button>
             </div>
-            <div className="text-[11px] font-mono text-cyan-200" role="status">{isComputingSandbox ? 'Sandbox recalculating on the 2D solver (can take about a minute first time)…' : sandboxResult ? sandboxResult.summary : 'No sandbox result yet.'}</div>
           </div>
           {/* 1. Physical Drainage Disruption Configuration (Synchronized across entire app) */}
           <div className="bg-onyx-900 border border-onyx-800 rounded p-3.5 space-y-2.5">
@@ -540,6 +555,7 @@ export const FloodSimulationView: React.FC = () => {
                       </span>
                     </div>
                     <div className="text-[11px] text-storm-300 mt-1">{d.name}</div>
+                    {d.plainConsequence && <div className="text-[11px] text-storm-100 mt-0.5">{d.plainConsequence}</div>}
                     <div className="text-[10px] font-mono text-storm-400 mt-1 flex flex-wrap gap-x-2">
                       <span>Cell [{d.gridCell[0]}, {d.gridCell[1]}]</span>
                       <span>
