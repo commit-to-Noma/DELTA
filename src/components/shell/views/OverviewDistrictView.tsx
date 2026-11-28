@@ -32,6 +32,7 @@ import {
 } from '../../simulation/GeographicSimulationCanvas';
 import { CanvasLayerDock } from '../../simulation/CanvasLayerDock';
 import { MapLegend } from '../../simulation/MapLegend';
+import { isDemoWorkOrder, shouldShowQuickstart } from '../../../simulation/phase2Ux';
 
 interface OverviewDistrictViewProps {
   onNavigateToSimulation?: () => void;
@@ -50,6 +51,7 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
     evaluationResult,
     isComputingEvaluation,
     activeScenarioHash,
+    decisions,
     workOrders,
     canvasLayers,
     toggleCanvasLayer,
@@ -60,6 +62,16 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
     selectedRoadId,
     setSelectedRoadId
   } = useIncidentWorkspace();
+
+  const [quickstartDismissed, setQuickstartDismissed] = useState<boolean>(() => {
+    try { return localStorage.getItem('delta_quickstart_dismissed') === '1'; } catch { return false; }
+  });
+  const hasSavedRun = (decisions?.length ?? 0) > 0 || workOrders.some((w) => !isDemoWorkOrder(w));
+  const showQuickstart = shouldShowQuickstart({ hasSavedRun, dismissed: quickstartDismissed });
+  const dismissQuickstart = () => {
+    setQuickstartDismissed(true);
+    try { localStorage.setItem('delta_quickstart_dismissed', '1'); } catch { /* non-fatal */ }
+  };
 
   const [hoveredCell, setHoveredCell] = useState<CellHoverInfo | null>(null);
   const [clickedCell, setClickedCell] = useState<CellHoverInfo | null>(null);
@@ -95,6 +107,24 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
   return (
     <div className="flex flex-col gap-3 h-full">
       <StageIntro subtitle="Look at the map, pick a storm, then enter the simulation to see which hospital roads flood." />
+      {showQuickstart && (
+        <div className="bg-cyan-950/50 border border-cyan-800 rounded px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2" data-testid="quickstart-strip">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-cyan-100">
+            <span className="font-bold uppercase tracking-wider text-cyan-300">Quickstart</span>
+            <span>1. Run Storm</span><span aria-hidden="true">→</span>
+            <span>2. Approve &amp; Audit</span><span aria-hidden="true">→</span>
+            <span>3. Dispatch &amp; Verify Gate</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={handleEnterSimulation} className="px-3 py-1 rounded bg-safety-orange hover:bg-orange-600 text-white text-[11px] font-mono font-bold">
+              Start: Run Storm (Stage 2)
+            </button>
+            <button type="button" onClick={dismissQuickstart} aria-label="Dismiss quickstart" className="px-2 py-1 rounded bg-onyx-950 border border-onyx-700 text-storm-300 text-[11px] font-mono">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {/* Compact Top Catchment & Scenario Summary Strip */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">

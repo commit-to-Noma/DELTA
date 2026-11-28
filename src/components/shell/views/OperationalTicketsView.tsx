@@ -32,6 +32,8 @@ import {
 import { invokeSafe } from '../../../services/forgeBridge';
 import { useIncidentWorkspace } from '../../../context/IncidentWorkspaceContext';
 import { StageIntro } from '../../common/StageIntro';
+import { Accordion } from '../../common/Accordion';
+import { isDemoWorkOrder, partitionWorkOrders } from '../../../simulation/phase2Ux';
 
 export const OperationalTicketsView: React.FC = () => {
   const {
@@ -225,112 +227,7 @@ export const OperationalTicketsView: React.FC = () => {
   const countStaged = workOrders.filter(w => w.stage === 'COMMANDER_STAGED').length;
   const countLinked = workOrders.filter(w => w.stage === 'JIRA_LINKED').length;
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <StageIntro subtitle="Turn an approved decision into a work order, stage it, then dispatch it to Jira." />
-        <button type="button" onClick={() => setActiveStage('interventions')} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white text-xs font-mono font-bold">
-          Approve a new decision <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      {/* Notice Banner */}
-      <div className="bg-onyx-900 border-l-4 border-cyan-500 p-4 rounded-r border-y border-r border-onyx-800 flex items-start gap-3">
-        <Ticket className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
-        <div className="text-xs font-mono text-storm-300 space-y-1">
-          <div className="font-bold text-storm-100 uppercase tracking-wider flex items-center gap-2">
-            <span>OPERATIONAL WORK ORDERS &amp; JSM STAGING QUEUE</span>
-            <span className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-700 text-cyan-300 text-[10px]">
-              WORKSTREAM 4A VERIFIED
-            </span>
-          </div>
-          <p className="text-storm-300 font-sans">
-            Approved hydrodynamic mitigation decisions transition through rigorous operational staging: from <strong>PREPARED DRAFT</strong> to <strong>COMMANDER STAGED</strong> and <strong>JIRA LINKED</strong>. Every operational claim explicitly distinguishes between <em>Source-Verified</em>, <em>Derived</em>, <em>Planning Assumptions</em>, and <em>Unverified</em> content.
-          </p>
-          <p className="text-amber-300 font-sans">
-            Demo seed cards (DEC-2026-080/081, e.g. JSM-4902) are illustrative staging examples — they are <strong>not</strong> live Jira tickets. Real work orders appear only after you approve a decision in Step 03 and dispatch.
-          </p>
-        </div>
-      </div>
-
-      {actionNotice && (
-        <div className="p-3 bg-emerald-950/80 border border-emerald-700 rounded text-xs font-mono text-emerald-200 flex items-center gap-2 shadow-tactical">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          <span>{actionNotice}</span>
-        </div>
-      )}
-
-      {/* Filter and Search Bar */}
-      <div className="bg-onyx-900 p-3 rounded-lg border border-onyx-800 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-xs shadow-tactical">
-        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-          <button
-            onClick={() => setSelectedStage('ALL')}
-            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
-              selectedStage === 'ALL'
-                ? 'bg-cyan-600 text-white shadow-tactical'
-                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
-            }`}
-          >
-            ALL ({workOrders.length})
-          </button>
-          <button
-            onClick={() => setSelectedStage('PREPARED_DRAFT')}
-            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
-              selectedStage === 'PREPARED_DRAFT'
-                ? 'bg-slate-600 text-white shadow-tactical'
-                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
-            }`}
-          >
-            DRAFT ({countDraft})
-          </button>
-          <button
-            onClick={() => setSelectedStage('COMMANDER_STAGED')}
-            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
-              selectedStage === 'COMMANDER_STAGED'
-                ? 'bg-amber-600 text-white shadow-tactical'
-                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
-            }`}
-          >
-            STAGED ({countStaged})
-          </button>
-          <button
-            onClick={() => setSelectedStage('JIRA_LINKED')}
-            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
-              selectedStage === 'JIRA_LINKED'
-                ? 'bg-emerald-600 text-white shadow-tactical'
-                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
-            }`}
-          >
-            JIRA LINKED ({countLinked})
-          </button>
-        </div>
-
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-storm-500" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search site, ID, or issue..."
-            className="w-full bg-onyx-950 border border-onyx-700 rounded pl-8 pr-3 py-1.5 text-xs text-storm-100 placeholder-storm-600 focus:outline-none focus:border-cyan-500"
-          />
-        </div>
-      </div>
-
-      {/* Work Orders List */}
-      <div className="space-y-4">
-        {isLoading ? (
-          <div className="p-8 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs">
-            Loading staged operational work orders...
-          </div>
-        ) : filteredWorkOrders.length === 0 ? (
-          <div className="p-8 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs space-y-2">
-            <p>No operational work orders found matching the selected filter criteria.</p>
-            <p className="text-[11px] text-storm-500">
-              Work orders are prepared from approved mitigation decisions in Tab 05 (Decision Records).
-            </p>
-          </div>
-        ) : (
-          filteredWorkOrders.map((wo) => {
+  const renderWorkOrderCard = (wo: OperationalWorkOrder) => {
             const reviewedCount = wo.operationalTasks.filter(t => t.isCompleted).length;
             const totalTasks = wo.operationalTasks.length;
             const progressPct = totalTasks > 0 ? Math.round((reviewedCount / totalTasks) * 100) : 0;
@@ -405,6 +302,20 @@ export const OperationalTicketsView: React.FC = () => {
                 </div>
 
                 <div className="p-5 space-y-4 text-xs">
+                  {/* Compact action summary (Phase 2) */}
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="work-order-compact-summary">
+                    <span className="px-2 py-1 rounded bg-onyx-900 border border-onyx-700 text-storm-200"><MapPin className="w-3 h-3 inline mr-1 text-safety-orange" />Target Site: <strong>{wo.targetLocation.name}</strong></span>
+                    <span className="px-2 py-1 rounded bg-onyx-900 border border-onyx-700 text-storm-200"><Wrench className="w-3 h-3 inline mr-1 text-cyan-400" />Equipment: {wo.tacticalEquipment.length} item{wo.tacticalEquipment.length === 1 ? '' : 's'}{wo.tacticalEquipment.length > 0 ? ` — ${wo.tacticalEquipment.slice(0, 2).join(', ')}` : ''}</span>
+                    {wo.jiraIntegration?.linkedIssueKey ? (
+                      <a href={`#/issue/${wo.jiraIntegration.linkedIssueKey}`} className="px-2 py-1 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 font-bold underline">{wo.jiraIntegration.linkedIssueKey}</a>
+                    ) : isDemoWorkOrder(wo) ? (
+                      <span className="px-2 py-1 rounded bg-onyx-800 border border-onyx-700 text-storm-400 font-bold">Demo example</span>
+                    ) : wo.stage === 'PREPARED_DRAFT' ? (
+                      <span className="px-2 py-1 rounded bg-onyx-800 border border-onyx-700 text-storm-300 font-bold">Stage for commander review to dispatch</span>
+                    ) : (
+                      <button type="button" onClick={() => handleDispatchLive(wo)} disabled={dispatchState[wo.workOrderId]?.status === 'working'} className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold">{dispatchState[wo.workOrderId]?.status === 'working' ? 'DISPATCHING…' : 'Dispatch Live Jira Issue'}</button>
+                    )}
+                  </div>
                   {/* Plan Name & Strategic Rationale */}
                   <div>
                     <h3 className="text-sm font-bold text-storm-100 font-sans">
@@ -801,7 +712,129 @@ export const OperationalTicketsView: React.FC = () => {
                 </div>
               </div>
             );
-          })
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <StageIntro subtitle="Turn an approved decision into a work order, stage it, then dispatch it to Jira." />
+        <button type="button" onClick={() => setActiveStage('interventions')} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white text-xs font-mono font-bold">
+          Approve a new decision <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {/* Notice Banner */}
+      <div className="bg-onyx-900 border-l-4 border-cyan-500 p-4 rounded-r border-y border-r border-onyx-800 flex items-start gap-3">
+        <Ticket className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs font-mono text-storm-300 space-y-1">
+          <div className="font-bold text-storm-100 uppercase tracking-wider flex items-center gap-2">
+            <span>OPERATIONAL WORK ORDERS &amp; JSM STAGING QUEUE</span>
+            <span className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-700 text-cyan-300 text-[10px]">
+              WORKSTREAM 4A VERIFIED
+            </span>
+          </div>
+          <p className="text-storm-300 font-sans">
+            Approved hydrodynamic mitigation decisions transition through rigorous operational staging: from <strong>PREPARED DRAFT</strong> to <strong>COMMANDER STAGED</strong> and <strong>JIRA LINKED</strong>. Every operational claim explicitly distinguishes between <em>Source-Verified</em>, <em>Derived</em>, <em>Planning Assumptions</em>, and <em>Unverified</em> content.
+          </p>
+          <p className="text-amber-300 font-sans">
+            Demo seed cards (DEC-2026-080/081, e.g. JSM-4902) are illustrative staging examples — they are <strong>not</strong> live Jira tickets. Real work orders appear only after you approve a decision in Step 03 and dispatch.
+          </p>
+        </div>
+      </div>
+
+      {actionNotice && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-700 rounded text-xs font-mono text-emerald-200 flex items-center gap-2 shadow-tactical">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <span>{actionNotice}</span>
+        </div>
+      )}
+
+      {/* Filter and Search Bar */}
+      <div className="bg-onyx-900 p-3 rounded-lg border border-onyx-800 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-xs shadow-tactical">
+        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+          <button
+            onClick={() => setSelectedStage('ALL')}
+            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
+              selectedStage === 'ALL'
+                ? 'bg-cyan-600 text-white shadow-tactical'
+                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
+            }`}
+          >
+            ALL ({workOrders.length})
+          </button>
+          <button
+            onClick={() => setSelectedStage('PREPARED_DRAFT')}
+            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
+              selectedStage === 'PREPARED_DRAFT'
+                ? 'bg-slate-600 text-white shadow-tactical'
+                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
+            }`}
+          >
+            DRAFT ({countDraft})
+          </button>
+          <button
+            onClick={() => setSelectedStage('COMMANDER_STAGED')}
+            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
+              selectedStage === 'COMMANDER_STAGED'
+                ? 'bg-amber-600 text-white shadow-tactical'
+                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
+            }`}
+          >
+            STAGED ({countStaged})
+          </button>
+          <button
+            onClick={() => setSelectedStage('JIRA_LINKED')}
+            className={`px-3 py-1.5 rounded transition-colors text-[11px] font-bold ${
+              selectedStage === 'JIRA_LINKED'
+                ? 'bg-emerald-600 text-white shadow-tactical'
+                : 'bg-onyx-950 text-storm-300 hover:bg-onyx-850 border border-onyx-800'
+            }`}
+          >
+            JIRA LINKED ({countLinked})
+          </button>
+        </div>
+
+        <div className="relative w-full sm:w-64">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-storm-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search site, ID, or issue..."
+            className="w-full bg-onyx-950 border border-onyx-700 rounded pl-8 pr-3 py-1.5 text-xs text-storm-100 placeholder-storm-600 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+      </div>
+
+      {/* Work Orders List */}
+      <div className="space-y-4">
+        {isLoading ? (
+          <div className="p-8 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs">
+            Loading staged operational work orders...
+          </div>
+        ) : filteredWorkOrders.length === 0 ? (
+          <div className="p-8 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs space-y-2">
+            <p>No operational work orders found matching the selected filter criteria.</p>
+            <p className="text-[11px] text-storm-500">
+              Work orders are prepared from approved mitigation decisions in Tab 05 (Decision Records).
+            </p>
+          </div>
+        ) : (
+          (() => {
+            const { real, demo } = partitionWorkOrders(filteredWorkOrders);
+            return (
+              <>
+                {real.length === 0 && (
+                  <div className="p-6 text-center bg-onyx-900 border border-onyx-800 rounded-lg text-storm-400 font-mono text-xs">No real work orders yet — approve a decision in Step 03 to create one, then dispatch it here.</div>
+                )}
+                {real.map((wo) => renderWorkOrderCard(wo))}
+                {demo.length > 0 && (
+                  <Accordion title={`Example Templates (${demo.length})`} testId="example-templates">
+                    <div className="space-y-4 pt-2">{demo.map((wo) => renderWorkOrderCard(wo))}</div>
+                  </Accordion>
+                )}
+              </>
+            );
+          })()
         )}
       </div>
     </div>

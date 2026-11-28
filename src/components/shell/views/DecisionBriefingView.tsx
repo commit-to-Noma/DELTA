@@ -50,6 +50,13 @@ import {
 } from '../../../simulation/briefingExporter';
 import { useIncidentWorkspace } from '../../../context/IncidentWorkspaceContext';
 import { DecisionRecordsView } from './DecisionRecordsView';
+import { Accordion } from '../../common/Accordion';
+import {
+  buildExecutiveSummary,
+  integrityVerdict,
+  storedConfluenceAuditUrl,
+  type IntegrityVerdict
+} from '../../../simulation/phase2Ux';
 
 interface DecisionBriefingViewProps {
   onNavigateToTab?: (tab: 'overview' | 'simulation' | 'interventions' | 'decisions' | 'tickets') => void;
@@ -74,9 +81,10 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
   } = useIncidentWorkspace();
 
   const [activeSubTab, setActiveSubTab] = useState<
-    'executive' | 'interventions' | 'robustness' | 'governance' | 'records'
+    'executive' | 'interventions' | 'records'
   >('executive');
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [integrity, setIntegrity] = useState<'idle' | IntegrityVerdict>('idle');
 
   // Compute cross-profile matrix keyed strictly to activeDisruptionIds
   const crossProfileMatrix: CrossProfileMatrixEntry[] = useMemo(() => {
@@ -94,6 +102,11 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
       crossProfileMatrix
     );
   }, [evaluationResult, dataset, activeDecisionForScenario, activeWorkOrderForScenario, crossProfileMatrix]);
+
+  const executiveSummary = useMemo(
+    () => (briefing ? buildExecutiveSummary(briefing, storedConfluenceAuditUrl()) : null),
+    [briefing]
+  );
 
   const isExportSafe = Boolean(
     briefing && activeScenarioHash && !isComputingEvaluation && verifyBriefingBinding(briefing, activeScenarioHash)
@@ -232,6 +245,63 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
         </div>
       </div>
 
+      {/* Executive Decision Summary Card (Phase 2) */}
+      {briefing && executiveSummary && (
+        <div className="bg-onyx-900 border border-emerald-800/70 rounded p-4 space-y-3" data-testid="executive-decision-summary">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="text-[10px] font-mono text-emerald-300 uppercase tracking-wider font-bold">Executive Decision Summary</span>
+              <h2 className="text-base font-bold text-white mt-0.5">{executiveSummary.planName}</h2>
+              <p className="text-[11px] font-mono text-storm-400">
+                {executiveSummary.decisionId ? `Decision ${executiveSummary.decisionId} · ` : 'Not yet approved · '}
+                Signed: {executiveSummary.approver}
+                {briefing.governanceAndStaging.approvalTimestamp
+                  ? ` · ${new Date(briefing.governanceAndStaging.approvalTimestamp).toLocaleString()}`
+                  : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIntegrity(integrityVerdict(briefing, activeScenarioHash))}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-[11px] font-bold border transition-colors ${
+                integrity === 'verified'
+                  ? 'bg-emerald-950 border-emerald-600 text-emerald-300'
+                  : integrity === 'mismatch'
+                  ? 'bg-red-950 border-red-700 text-red-300'
+                  : 'bg-onyx-950 border-cyan-700 text-cyan-300 hover:border-cyan-400'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              {integrity === 'verified'
+                ? 'Runs on Atlassian · SHA-256 Verified'
+                : integrity === 'mismatch'
+                ? 'SHA-256 mismatch — do not export'
+                : 'Runs on Atlassian · Verify SHA-256 integrity'}
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {executiveSummary.metrics.map((m) => (
+              <div key={m.label} className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
+                <span className="text-[9px] font-mono text-storm-400 uppercase block">{m.label}</span>
+                <span className="text-sm font-bold font-mono text-emerald-300">{m.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono">
+            {executiveSummary.confluenceUrl ? (
+              <a href={executiveSummary.confluenceUrl} target="_blank" rel="noreferrer" className="text-cyan-300 underline font-bold">
+                Confluence audit page
+              </a>
+            ) : (
+              <button type="button" onClick={() => navigate('interventions')} className="text-cyan-300 underline font-bold">
+                Publish Confluence audit in Step 03
+              </button>
+            )}
+            <span className="text-storm-500">Scenario: {executiveSummary.scenarioHash}</span>
+          </div>
+        </div>
+      )}
+
       {/* Synchronized Scenario Selector + Section Tabs */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-3.5 py-2.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -272,9 +342,7 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
           {[
             { id: 'executive', label: '1. Executive & Hazard' },
             { id: 'interventions', label: '2. Interventions' },
-            { id: 'robustness', label: '3. Stress Matrix' },
-            { id: 'governance', label: '4. Governance Binding' },
-            { id: 'records', label: '5. Decision Records' }
+            { id: 'records', label: '3. Decision Records' }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -518,9 +586,10 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
             </div>
           )}
 
-          {/* SUBTAB 3: CROSS-SCENARIO ROBUSTNESS MATRIX */}
-          {activeSubTab === 'robustness' && briefing && (
-            <div className="bg-onyx-900 border border-onyx-800 rounded p-4 space-y-3">
+          {/* ACCORDION: CROSS-SCENARIO ROBUSTNESS MATRIX (Phase 2) */}
+          {briefing && (
+            <Accordion title="Stress Matrix" testId="accordion-stress-matrix">
+            <div className="pt-2 space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-onyx-800">
                 <div>
                   <h3 className="text-xs font-bold font-mono text-white uppercase">
@@ -571,11 +640,13 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
                 </table>
               </div>
             </div>
+            </Accordion>
           )}
 
-          {/* SUBTAB 4: GOVERNANCE BINDING & DISCLOSURES */}
-          {activeSubTab === 'governance' && briefing && (
-            <div className="space-y-4">
+          {/* ACCORDION: GOVERNANCE BINDING & DISCLOSURES (Phase 2) */}
+          {briefing && (
+            <Accordion title="Governance Binding" testId="accordion-governance">
+            <div className="space-y-4 pt-2">
               {!activeDecisionForScenario && latestHistoricalDecision && (
                 <div className="bg-amber-950/35 border border-amber-700/60 rounded p-3 text-xs font-mono text-amber-200 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
@@ -657,6 +728,20 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
                 </ul>
               </div>
             </div>
+            </Accordion>
+          )}
+
+          {/* ACCORDION: RAW AUDIT DETAILS (Phase 2) */}
+          {briefing && (
+            <Accordion title="Raw Audit Details" testId="accordion-raw-audit">
+              <dl className="space-y-1.5 text-[11px] font-mono text-storm-300 pt-2">
+                <div className="flex justify-between gap-3"><dt className="text-storm-500">Briefing ID</dt><dd className="text-storm-100">{briefing.briefingId}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-storm-500">Scenario hash</dt><dd className="text-cyan-300 break-all text-right">{briefing.scenarioHash}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-storm-500">Active hash</dt><dd className="text-cyan-300 break-all text-right">{activeScenarioHash || '—'}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-storm-500">Export binding</dt><dd className={isExportSafe ? 'text-emerald-300' : 'text-amber-300'}>{isExportSafe ? 'Verified — export safe' : 'Pending verification'}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-storm-500">Posture</dt><dd className="text-storm-100">{briefing.incidentPosture}</dd></div>
+              </dl>
+            </Accordion>
           )}
 
           {/* SUBTAB 5: FULL IMMUTABLE DECISION RECORDS LEDGER */}

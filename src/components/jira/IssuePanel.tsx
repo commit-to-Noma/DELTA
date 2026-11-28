@@ -21,6 +21,7 @@ import {
   getStoredWorkOrders, 
   saveStoredWorkOrder
 } from '../../simulation/workOrderEngine';
+import { buildPanelDecisionSummary, issuePanelState, storedConfluenceAuditUrl } from '../../simulation/phase2Ux';
 
 interface IssuePanelProps {
   initialIssueKey?: string;
@@ -275,6 +276,10 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
     }
   };
 
+  const panelState = issuePanelState({ issueKey, isLoading, linkedDecision });
+  const panelSummary = buildPanelDecisionSummary(linkedDecision);
+  const confluenceAuditUrl = storedConfluenceAuditUrl();
+
   const rationale = linkedDecision?.engineeringRationale || linkedDecision?.notes || linkedDecision?.chosenPlan?.tradeOffSummary;
   const avoidedVol = linkedDecision?.differentialMetrics?.avoidedSurfaceVolumeM3;
   const depthDelta = linkedDecision?.differentialMetrics?.peakDepthReductionM;
@@ -343,7 +348,7 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
       )}
 
       <div className="p-3 rounded-lg bg-onyx-900 border border-cyan-800/60 space-y-1 text-[11px]" data-testid="flood-impact-snapshot">
-        <div className="font-bold text-white uppercase tracking-wider">Flood-impact snapshot</div>
+        <div className="font-bold text-white uppercase tracking-wider">Live catchment risk summary · Flood-impact snapshot</div>
         {snapshot?.simulation?.data ? (
           <div className="grid grid-cols-3 gap-2 font-mono">
             <span>Peak depth<br /><strong className="text-cyan-300">{snapshot.simulation.data.maxWaterDepthM ?? '—'} m</strong></span>
@@ -419,6 +424,36 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
               </div>
             )}
           </div>
+
+          {/* Decision + Metrics + Confluence + Dispatch card (Phase 2) */}
+          {panelSummary && (
+            <div className="p-3 rounded-lg bg-onyx-900 border border-cyan-800/70 space-y-2" data-testid="panel-dispatch-card" data-panel-state={panelState}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-[11px] uppercase tracking-wider text-storm-100">Decision · {panelSummary.decisionId}</span>
+                <span className="text-[10px] text-storm-400">Signed: {panelSummary.approver}</span>
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-storm-300">
+                {panelSummary.metrics.map((m) => (
+                  <span key={m.label}>{m.label}: <strong className="text-emerald-300">{m.value}</strong></span>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                {confluenceAuditUrl ? (
+                  <a href={confluenceAuditUrl} target="_blank" rel="noreferrer" className="text-cyan-300 underline font-bold">Confluence audit page</a>
+                ) : (
+                  <span className="text-storm-400">Confluence audit link appears after Publish in Step 03/04.</span>
+                )}
+                {linkedWorkOrder ? (
+                  <span className="text-storm-200">Dispatch: <strong>{linkedWorkOrder.workOrderId}</strong> · {linkedWorkOrder.stage.replace(/_/g, ' ')}</span>
+                ) : (
+                  <span className="text-storm-400">Dispatch: work order stages after approval.</span>
+                )}
+                {onOpenFullApp && (
+                  <button type="button" onClick={onOpenFullApp} className="text-safety-orange underline font-bold">Open Ops Center</button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Human Engineering Rationale Callout */}
           {rationale && (
@@ -592,8 +627,21 @@ export const IssuePanel: React.FC<IssuePanelProps> = ({ initialIssueKey, onOpenF
               <div className="font-bold text-amber-300 uppercase">NO DECISION RECORD LINKED</div>
               <p className="text-storm-300 text-[11px] font-sans pt-0.5">
                 This Jira incident issue is not currently linked to an approved DELTA mitigation decision in Forge KVS.
+                Review the live catchment risk summary above, then link a decision or open the Ops Center to run the storm.
               </p>
             </div>
+          </div>
+          <div className="flex flex-wrap gap-2" data-testid="unlinked-ctas">
+            {availableDecisions.length > 0 && selectedDecisionId && (
+              <button type="button" onClick={handleLinkDecision} disabled={isLinking} className="px-3 py-1.5 rounded bg-safety-orange hover:bg-safety-hover disabled:opacity-50 text-white font-bold text-[11px]">
+                {isLinking ? 'Linking…' : 'Link Decision'}
+              </button>
+            )}
+            {onOpenFullApp && (
+              <button type="button" onClick={onOpenFullApp} className="px-3 py-1.5 rounded bg-onyx-950 border border-safety-orange/50 text-safety-orange font-bold text-[11px]">
+                Open Ops Center
+              </button>
+            )}
           </div>
 
           {availableDecisions.length > 0 ? (

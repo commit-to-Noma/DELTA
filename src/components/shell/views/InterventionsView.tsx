@@ -256,7 +256,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
         if (publishToConfluence) {
           try {
             const pub: any = await invokeSafe('publishAuditToConfluence', { decisionId: saved.decisionId, spaceKey: confluenceSpaceKey.trim() || undefined });
-            if (pub?.success) { setConfluencePageUrl(pub.pageUrl || null); setConfluenceNotice(`Audit page published to Confluence space ${pub.spaceKey || confluenceSpaceKey || '(auto-discovered)'}${pub.pageId ? ` (page ${pub.pageId})` : ''}.`); } else setConfluenceNotice(pub?.error?.message || pub?.message || 'Confluence audit export was not completed (requires Forge Confluence access).');
+            if (pub?.success) { setConfluencePageUrl(pub.pageUrl || null); try { if (pub.pageUrl) localStorage.setItem('delta_confluence_audit_url', pub.pageUrl); } catch { /* non-fatal */ } setConfluenceNotice(`Audit page published to Confluence space ${pub.spaceKey || confluenceSpaceKey || '(auto-discovered)'}${pub.pageId ? ` (page ${pub.pageId})` : ''}.`); } else setConfluenceNotice(pub?.error?.message || pub?.message || 'Confluence audit export was not completed (requires Forge Confluence access).');
           } catch { setConfluenceNotice('Confluence audit export was not completed (requires Forge Confluence access).'); }
         }
         registerNewDecision(saved);

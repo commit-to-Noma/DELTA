@@ -1,5 +1,9 @@
 # DELTA UX Overhaul — Handover
 
+**Status: Phases 0–2 COMPLETE** (Phase 2 = final polish, this update).
+
+**Phase 2 commit:** see `git log --oneline -1` (`feat(ux): Phase 2 final polish — executive summary, compact work orders, panel + quickstart`), on top of Phase 1.
+
 **Phase 1 commit:** `a6f228d1bf0a48e833eb5f27aeb4587fbef5822f` (`feat(ux): Phase 1 map zoom/pan, smoothed water, flow arrows, docked legend, decoupled playback`), on top of Phase 0. This HANDOVER update is committed immediately after that commit; `git log --oneline -3` shows both plus Phase 0.
 
 **Phase 0 commit:** `a9063eb2c89c83fef2dd93f86263c1c765381beb` (`feat(ux): Phase 0 quick wins — dedup nav, plain-English labels, specs drawer, sandbox bounding, Rovo starters`), on top of base `d37231ccaf69c73852e5816b00e17bef715f79ef`. Source plan: `docs/competition/ux-overhaul-plan.md` (restored in the Phase 0 commit from the parent session's checkpoint — it was not on `main`).
@@ -29,14 +33,28 @@
 
 **New files:** `src/simulation/mapViewport.ts`, `src/components/simulation/MapLegend.tsx`, `tests/phase1Map.test.ts` (6 tests). **No Phase 2 items were touched, and `forge deploy` was not run.**
 
-## Remaining — Phase 2 (Scannable decision surfaces, 1 day) — NOT STARTED
+## Completed — Phase 2 (Scannable decision surfaces / final polish)
 
-- [ ] Stage 4: Executive Decision Summary Card first (plan, 3 metrics, approver, Confluence link, **Runs on Atlassian · SHA-256 Verified** 1-click integrity check); Stress Matrix / Governance / raw audit into accordions.
-- [ ] Stage 5: compact real work-order cards (status, site, equipment count, Dispatch/link); 3 demo cards into closed-by-default **Example Templates**.
-- [ ] Issue Panel: unlinked = compact catchment risk + Link/Open CTAs; linked = decision + metrics + Confluence + dispatch card.
-- [ ] 3-Step Quickstart strip on Stage 1 when no saved run (dismissible): Run Storm → Approve & Publish → Dispatch & Verify Gate.
+- [x] **Stage 4 Executive Decision Summary Card:** `DecisionBriefingView` now leads with a summary card (chosen plan, 3 key metrics — avoided storage / peak-depth reduction / corridors protected — commander signature + timestamp, Confluence audit link or "Publish Confluence audit in Step 03" jump, scenario hash) and a 1-click **Runs on Atlassian · SHA-256 Verified** integrity button backed by the real `verifyBriefingBinding` check (verified / mismatch / pending states). Stress Matrix, Governance Binding, and Raw Audit Details (briefing id, hashes, export-binding state) are tucked into closed-by-default accordions (`src/components/common/Accordion.tsx`). Successful Confluence publishes in Step 03 now persist the page URL (`delta_confluence_audit_url`) so Stage 4 can link it.
+- [x] **Stage 5 compact work orders:** Real approved work orders render first as compact, scannable action cards (status badge, Target Site, equipment summary, primary **Dispatch Live Jira Issue** button / clickable linked ticket) with the full provenance/checklist detail preserved below. The 3 demo seeds (`DEC-2026-079/080/081`) are partitioned by `partitionWorkOrders()` into a closed-by-default **Example Templates** accordion.
+- [x] **Jira Issue Panel polish:** Unlinked state leads with the live catchment risk summary ("Live catchment risk summary · Flood-impact snapshot") plus 1-click **Link Decision** / **Open Ops Center** CTAs; linked state adds a crisp Decision + Metrics + Confluence + Dispatch card (`panel-dispatch-card`) above the existing rationale/work-order detail. Panel state classification is the pure `issuePanelState()` helper.
+- [x] **First-Run Quickstart strip:** Stage 1 shows a compact dismissible 3-step strip (1. Run Storm → 2. Approve & Audit → 3. Dispatch & Verify Gate) only when no saved run exists (no decisions and no real work orders), with a 1-click jump to Stage 2; dismissal persists in localStorage.
+
+**New files:** `src/simulation/phase2Ux.ts` (pure helpers), `src/components/common/Accordion.tsx`, `tests/phase2Ux.test.ts` (9 tests). Presentation-only; no backend/resolver changes.
 
 ## Verification
+
+### Phase 2 (2026-11-28)
+
+| Command | Result |
+|---|---|
+| `npm run lint` (`tsc --noEmit`) | ✅ Pass |
+| `npm test` (`vitest run`) | ✅ **262 passed (22 files)** — 253 Phase 1 + 9 new `tests/phase2Ux.test.ts` |
+| `npm run build` (`tsc -b && vite build`) | ✅ Pass (2403 modules, 0 chunk warnings) |
+| `forge lint` | ✅ "No issues found." (0 errors, 0 warnings) |
+
+Deploy: `forge deploy` (development) + Jira/Confluence development upgrades on one-atlas-xttm.atlassian.net — see git history / deploy log below in this file's Phase 2 note. Production promotion only after visual inspection on development.
+
 
 ### Phase 1 (run in the Phase 1 worktree, 2026-11-28)
 
