@@ -77,3 +77,5 @@ Per-phase gate from the plan: `npm run lint && npm test && npm run build && forg
 | `forge lint` | ✅ "No issues found." |
 
 Target from the plan (243+ tests always green) is met and rising (253). To resume: start Phase 2 with the Stage 4 Executive Decision Summary Card, re-run the four commands above, and only then consider `forge deploy` (development) + visual check on one-atlas.
+
+Production deploy (2026-11-28): `forge deploy -e production` ✅ (app v3.1.0 production versioning, "Runs on Atlassian" eligible) after local visual check of v5.2.0 dev build passed (zoom controls, quickstart, human hero, specs drawer present). Judge Sharing Link serves this build once Distribution status is Sharing (manual Developer Console step).
