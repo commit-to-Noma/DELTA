@@ -10,6 +10,7 @@ import {
   gridToLatLon,
 } from '../../data/catchmentLoader';
 import type { OperationalWorkOrder } from '../../simulation/workOrderEngine';
+import { computeMapLayout, identityViewport, zoomAtPoint, screenToGrid, gridToScreen, viewCellSize, waterColorForDepth, flowArrowForGradient, type ViewportTransform } from '../../simulation/mapViewport';
 
 export interface HospitalExposureInfo {
   facility: CriticalFacility;
@@ -95,6 +96,9 @@ export interface GeographicSimulationCanvasProps {
   onSelectRoad?: (road: RoadSegment | null) => void;
   onSelectFacility?: (facility: CriticalFacility | null) => void;
   onSelectWorkOrder?: (wo: OperationalWorkOrder | null) => void;
+  waterDepthRef?: React.RefObject<Float64Array | null>;
+  showViewportControls?: boolean;
+  interactiveViewport?: boolean;
 }
 
 export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProps> = ({
@@ -116,10 +120,24 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
   onSelectRoad,
   onSelectFacility,
   onSelectWorkOrder,
+  waterDepthRef,
+  showViewportControls = true,
+  interactiveViewport = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [internalHover, setInternalHover] = useState<{ row: number; col: number } | null>(null);
+  const hoverRef = useRef<{ row: number; col: number } | null>(null);
+  const viewportRef = useRef<ViewportTransform>(identityViewport());
+  const layoutRef = useRef<ReturnType<typeof computeMapLayout> | null>(null);
+  const drawRef = useRef<(() => void) | null>(null);
+  const flowPhaseRef = useRef(0);
+  const waterOffscreenRef = useRef<HTMLCanvasElement | null>(null);
+  const depthRef = useRef<Float64Array>(waterDepth);
+  const lastPolledDepthRef = useRef<Float64Array | null>(null);
+  const dragRef = useRef<{ x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
+  const zoomLabelRef = useRef<HTMLSpanElement | null>(null);
+  depthRef.current = waterDepthRef?.current ?? waterDepth;
   const [satelliteImage, setSatelliteImage] = useState<HTMLImageElement | null>(null);
 
   useEffect(() => {
@@ -189,7 +207,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     (facility: CriticalFacility): HospitalExposureInfo => {
       const [r, c] = facility.gridCell;
       const campusGroundElevationM = dataset.elevationMatrix[r]?.[c] ?? 0;
-      const buildingStandingWaterDepthM = waterDepth[r * nx + c] || 0;
+      const buildingStandingWaterDepthM = depthRef.current[r * nx + c] || 0;
       const isBuildingDry = buildingStandingWaterDepthM < 0.05;
 
       // 8-neighborhood perimeter depth
@@ -200,7 +218,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
           const nr = r + dr;
           const nc = c + dc;
           if (nr >= 0 && nr < ny && nc >= 0 && nc < nx) {
-            const pd = waterDepth[nr * nx + nc] || 0;
+            const pd = depthRef.current[nr * nx + nc] || 0;
             if (pd > perimeterMaxDepthM) perimeterMaxDepthM = pd;
           }
         }
@@ -215,7 +233,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
             arteryName.toLowerCase().includes(road.name.toLowerCase())
           ) {
             for (const [rr, cc] of road.gridCells) {
-              const rd = waterDepth[rr * nx + cc] || 0;
+              const rd = depthRef.current[rr * nx + cc] || 0;
               if (rd > maxDepthM) maxDepthM = rd;
             }
           }
@@ -264,7 +282,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         summaryText,
       };
     },
-    [dataset.criticalRoads, dataset.elevationMatrix, nx, ny, waterDepth]
+    [dataset.criticalRoads, dataset.elevationMatrix, nx, ny]
   );
 
   // Evaluate rich road corridor info
@@ -277,7 +295,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
       let impassable = 0;
 
       for (const [r, c] of road.gridCells) {
-        const d = waterDepth[r * nx + c] || 0;
+        const d = depthRef.current[r * nx + c] || 0;
         if (d > maxDepth) maxDepth = d;
         sumDepth += d;
 
@@ -319,7 +337,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         passability,
       };
     },
-    [dataset.criticalFacilities, nx, waterDepth]
+    [dataset.criticalFacilities, nx]
   );
 
   // Helper to extract full cell information
@@ -327,7 +345,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     (row: number, col: number): CellHoverInfo => {
       const cellIndex = row * nx + col;
       const elevationM = dataset.elevationMatrix[row][col];
-      const depth = waterDepth[cellIndex] || 0;
+      const depth = depthRef.current[cellIndex] || 0;
       const { x: projectedX, y: projectedY } = gridToProjected(row, col);
       const { lat, lon } = gridToLatLon(row, col);
       const facility = facilityCellMap.get(`${row},${col}`);
@@ -428,10 +446,12 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     [maxElevationM, minElevationM]
   );
 
-  // Main Render Routine
-  useEffect(() => {
+  // Main Render Routine (imperative via drawRef so refs/RaF can redraw without React renders)
+  const drawScene = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    depthRef.current = waterDepthRef?.current ?? waterDepth;
+    const waterDepthNow = depthRef.current;
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
@@ -445,14 +465,12 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    // Strict 1:1 Aspect Ratio Box (Domain is 1600m x 1600m)
-    const padding = 28;
-    const availableWidth = width - padding * 2;
-    const availableHeight = height - padding * 2;
-    const displaySize = Math.max(100, Math.min(availableWidth, availableHeight));
-
-    const originX = Math.floor((width - displaySize) / 2);
-    const originY = Math.floor((height - displaySize) / 2);
+    const baseLayout = computeMapLayout(width, height, nx);
+    layoutRef.current = baseLayout;
+    const view = viewportRef.current;
+    const originX = baseLayout.originX + view.panX;
+    const originY = baseLayout.originY + view.panY;
+    const displaySize = baseLayout.displaySize * view.zoom;
     const cellSize = displaySize / nx;
 
     // 1. Background Fill
@@ -516,7 +534,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
           for (let c = 0; c < nx; c++) {
             const idx = r * nx + c;
             const hBase = baselineWaterDepth[idx] || 0;
-            const hPlan = waterDepth[idx] || 0;
+            const hPlan = waterDepthNow[idx] || 0;
             const delta = hBase - hPlan; // positive means plan avoided/reduced flood depth
 
             if (Math.abs(delta) >= 0.02) {
@@ -554,94 +572,41 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
           }
         }
       } else {
-        // --- STANDARD MODE: DISCRETE TACTICAL DEPTH BANDS ---
-        for (let r = 0; r < ny; r++) {
-          for (let c = 0; c < nx; c++) {
-            const idx = r * nx + c;
-            const h = waterDepth[idx];
-
-            if (h >= 0.02) {
-              const x = originX + c * cellSize;
-              const y = originY + r * cellSize;
-
-              // Tactical Discrete Band Color Assignment
-              if (h >= 0.60) {
-                // Band 4: Severe Hazard (>= 60 cm) - Deep Emergency Crimson
-                ctx.fillStyle = 'rgba(220, 38, 38, 0.92)';
-                ctx.fillRect(x, y, cellSize, cellSize);
-                ctx.strokeStyle = 'rgba(248, 113, 113, 0.8)';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
-              } else if (h >= 0.30) {
-                // Band 3: Critical Impassable (30 - 60 cm) - Safety Amber/Orange-Red
-                ctx.fillStyle = 'rgba(249, 115, 22, 0.85)';
-                ctx.fillRect(x, y, cellSize, cellSize);
-              } else if (h >= 0.15) {
-                // Band 2: Moderate Ponding (15 - 30 cm) - Deep Cobalt Blue
-                ctx.fillStyle = 'rgba(37, 99, 235, 0.80)';
-                ctx.fillRect(x, y, cellSize, cellSize);
-              } else if (h >= 0.05) {
-                // Band 1: Shallow Accumulation (5 - 15 cm) - Sky Blue
-                ctx.fillStyle = 'rgba(56, 189, 248, 0.60)';
-                ctx.fillRect(x, y, cellSize, cellSize);
-              } else {
-                // Band 0: Surface Runoff Sheen (2 - 5 cm) - Faint Cerulean
-                ctx.fillStyle = 'rgba(14, 165, 233, 0.25)';
-                ctx.fillRect(x, y, cellSize, cellSize);
-              }
-            }
-          }
+        // --- STANDARD MODE: bilinearly smoothed translucent water (offscreen grid + smoothed upscale) ---
+        if (!waterOffscreenRef.current) waterOffscreenRef.current = document.createElement('canvas');
+        const off = waterOffscreenRef.current; off.width = nx; off.height = ny;
+        const offCtx = off.getContext('2d');
+        if (offCtx) {
+          const img = offCtx.createImageData(nx, ny);
+          for (let i = 0; i < nx * ny; i++) { const [r, g, b, a] = waterColorForDepth(waterDepthNow[i] || 0); img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = a; }
+          offCtx.putImageData(img, 0, 0);
+          ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(off, originX, originY, displaySize, displaySize); ctx.restore();
+          // Wet-edge contour where wet cells meet dry cells
+          ctx.save(); ctx.strokeStyle = 'rgba(186, 230, 253, 0.38)'; ctx.lineWidth = 1; ctx.beginPath();
+          for (let r = 0; r < ny; r++) for (let c = 0; c < nx; c++) { if ((waterDepthNow[r * nx + c] || 0) < 0.02) continue; const x = originX + c * cellSize, y = originY + r * cellSize;
+            if (r === 0 || waterDepthNow[(r - 1) * nx + c] < 0.02) { ctx.moveTo(x, y); ctx.lineTo(x + cellSize, y); }
+            if (c === 0 || waterDepthNow[r * nx + c - 1] < 0.02) { ctx.moveTo(x, y); ctx.lineTo(x, y + cellSize); } }
+          ctx.stroke(); ctx.restore();
         }
       }
       ctx.restore();
     }
 
-    // 5. Render Hydraulic Velocity / Gradient Vectors
+    // 5. Velocity-scaled directional flow arrows (surface-gradient, animated downstream march)
     if (activeLayers.vectors && activeLayers.water && viewMode === 'standard') {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-      ctx.lineWidth = 1;
-
-      for (let r = 2; r < ny - 2; r += 4) {
-        for (let c = 2; c < nx - 2; c += 4) {
-          const idx = r * nx + c;
-          const h = waterDepth[idx];
-
-          if (h >= 0.05) {
-            const etaLeft = dataset.elevationMatrix[r][c - 1] + waterDepth[r * nx + (c - 1)];
-            const etaRight = dataset.elevationMatrix[r][c + 1] + waterDepth[r * nx + (c + 1)];
-            const etaTop = dataset.elevationMatrix[r - 1][c] + waterDepth[(r - 1) * nx + c];
-            const etaBottom = dataset.elevationMatrix[r + 1][c] + waterDepth[(r + 1) * nx + c];
-
-            const gradX = (etaLeft - etaRight) / (2 * 25.0);
-            const gradY = (etaTop - etaBottom) / (2 * 25.0);
-
-            const mag = Math.hypot(gradX, gradY);
-            if (mag > 0.0005) {
-              const dirX = gradX / mag;
-              const dirY = gradY / mag;
-              const arrowLength = Math.min(cellSize * 1.8, Math.max(cellSize * 0.6, mag * 800));
-
-              const startX = originX + (c + 0.5) * cellSize;
-              const startY = originY + (r + 0.5) * cellSize;
-              const endX = startX + dirX * arrowLength;
-              const endY = startY + dirY * arrowLength;
-
-              ctx.beginPath();
-              ctx.moveTo(startX, startY);
-              ctx.lineTo(endX, endY);
-              ctx.stroke();
-
-              const angle = Math.atan2(dirY, dirX);
-              const headLen = 3;
-              ctx.beginPath();
-              ctx.moveTo(endX, endY);
-              ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
-              ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
-              ctx.fill();
-            }
-          }
-        }
+      const phase = flowPhaseRef.current * cellSize * 0.6;
+      for (let r = 2; r < ny - 2; r += 3) for (let c = 2; c < nx - 2; c += 3) {
+        const h = waterDepthNow[r * nx + c]; if (h < 0.05) continue;
+        const gradX = ((dataset.elevationMatrix[r][c - 1] + waterDepthNow[r * nx + c - 1]) - (dataset.elevationMatrix[r][c + 1] + waterDepthNow[r * nx + c + 1])) / 50;
+        const gradY = ((dataset.elevationMatrix[r - 1][c] + waterDepthNow[(r - 1) * nx + c]) - (dataset.elevationMatrix[r + 1][c] + waterDepthNow[(r + 1) * nx + c])) / 50;
+        const arrow = flowArrowForGradient(gradX, gradY, cellSize); if (!arrow) continue;
+        const sx = originX + (c + 0.5) * cellSize + arrow.dirX * phase, sy = originY + (r + 0.5) * cellSize + arrow.dirY * phase;
+        const ex = sx + arrow.dirX * arrow.length, ey = sy + arrow.dirY * arrow.length; const ang = Math.atan2(arrow.dirY, arrow.dirX);
+        ctx.lineWidth = arrow.lineWidth + 1.6; ctx.strokeStyle = 'rgba(8,47,73,0.55)'; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.lineWidth = arrow.lineWidth; ctx.strokeStyle = 'rgba(224,242,254,0.92)'; ctx.fillStyle = 'rgba(224,242,254,0.95)';
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - arrow.headLen * Math.cos(ang - Math.PI / 6), ey - arrow.headLen * Math.sin(ang - Math.PI / 6)); ctx.lineTo(ex - arrow.headLen * Math.cos(ang + Math.PI / 6), ey - arrow.headLen * Math.sin(ang + Math.PI / 6)); ctx.closePath(); ctx.fill();
       }
     }
 
@@ -672,8 +637,8 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
           const [r1, c1] = road.gridCells[i];
           const [r2, c2] = road.gridCells[i + 1];
 
-          const d1 = waterDepth[r1 * nx + c1] || 0;
-          const d2 = waterDepth[r2 * nx + c2] || 0;
+          const d1 = waterDepthNow[r1 * nx + c1] || 0;
+          const d2 = waterDepthNow[r2 * nx + c2] || 0;
           const segDepth = Math.max(d1, d2);
 
           const p1x = originX + (c1 + 0.5) * cellSize;
@@ -814,7 +779,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
         for (let c = 0; c < nx; c++) {
           const idx = r * nx + c;
           const baseD = baselineWaterDepth[idx] || 0;
-          const currD = waterDepth[idx] || 0;
+          const currD = waterDepthNow[idx] || 0;
           const delta = baseD - currD;
           // Local water rise > 1cm caused by intervention
           if (delta <= -0.01) {
@@ -933,7 +898,7 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     }
 
     // 9. Render Hovered & Selected Cell Reticle
-    const activeCell = selectedCell || internalHover;
+    const activeCell = selectedCell || hoverRef.current;
     if (activeCell) {
       const { row, col } = activeCell;
       if (row >= 0 && row < ny && col >= 0 && col < nx) {
@@ -1010,87 +975,6 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(`${scaleBarM}m (EPSG:26986)`, scaleX + 4, scaleY - 5);
 
-    // 11. Docked On-Canvas Tactical Legend (if activeLayers.legend !== false)
-    if (activeLayers.legend !== false) {
-      const legW = 185;
-      const legH = viewMode === 'delta' ? 125 : 165;
-      const legX = originX + displaySize - legW - 10;
-      const legY = originY + displaySize - legH - 10;
-
-      // Legend Backdrop
-      ctx.fillStyle = 'rgba(8, 12, 16, 0.90)';
-      ctx.fillRect(legX, legY, legW, legH);
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(legX, legY, legW, legH);
-
-      // Legend Header
-      ctx.font = 'bold 9px monospace';
-      ctx.fillStyle = '#f97316';
-      ctx.fillText(viewMode === 'delta' ? 'DELTA: AVOIDED FLOOD' : 'DELTA SCREENING DEPTHS', legX + 8, legY + 14);
-
-      ctx.font = '8.5px monospace';
-      if (viewMode === 'delta') {
-        // Delta mode swatches
-        let currY = legY + 28;
-        const deltaItems = [
-          { color: 'rgba(16, 185, 129, 0.85)', label: 'Avoided Volume (Plan)' },
-          { color: 'rgba(245, 158, 11, 0.85)', label: 'Deflected Ponding' },
-          { color: 'rgba(148, 163, 184, 0.30)', label: 'Unchanged Domain' },
-        ];
-        for (const item of deltaItems) {
-          ctx.fillStyle = item.color;
-          ctx.fillRect(legX + 8, currY - 6, 10, 8);
-          ctx.fillStyle = '#e2e8f0';
-          ctx.fillText(item.label, legX + 24, currY);
-          currY += 16;
-        }
-
-        // Subtext
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '7.5px monospace';
-        ctx.fillText('Shows depth reduction vs baseline', legX + 8, legY + legH - 8);
-      } else {
-        // Standard Depth Bands
-        let currY = legY + 28;
-        const bands = [
-          { color: 'rgba(220, 38, 38, 0.95)', label: '≥ 60cm: Deep Inundation' },
-          { color: 'rgba(249, 115, 22, 0.88)', label: '30–60cm: Substantial Inundation' },
-          { color: 'rgba(37, 99, 235, 0.82)', label: '15–30cm: Moderate Ponding' },
-          { color: 'rgba(56, 189, 248, 0.65)', label: '5–15cm: Shallow Surface Water' },
-          { color: 'rgba(14, 165, 233, 0.30)', label: '< 5cm: Surface Wetting / Sheen' },
-        ];
-        for (const b of bands) {
-          ctx.fillStyle = b.color;
-          ctx.fillRect(legX + 8, currY - 6, 10, 8);
-          ctx.fillStyle = '#e2e8f0';
-          ctx.fillText(b.label, legX + 24, currY);
-          currY += 14;
-        }
-
-        // Road indicators
-        currY += 3;
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '8px monospace';
-        ctx.fillText('ROADS (Screening Tiers):', legX + 8, currY);
-        currY += 11;
-        ctx.fillStyle = '#22c55e';
-        ctx.fillText('■<15cm', legX + 8, currY);
-        ctx.fillStyle = '#f59e0b';
-        ctx.fillText('■15-30cm', legX + 62, currY);
-        ctx.fillStyle = '#ef4444';
-        ctx.fillText('■≥30cm', legX + 125, currY);
-
-        currY += 13;
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillText('✚ Hospital: Campus Monitored', legX + 8, currY);
-
-        currY += 11;
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '7px monospace';
-        ctx.fillText('* Model screening tiers. Field access unverified.', legX + 8, currY);
-      }
-    }
   }, [
     activeLayers,
     activePlanId,
@@ -1098,7 +982,6 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     dataset,
     getElevationColor,
     getHospitalExposure,
-    internalHover,
     nx,
     ny,
     satelliteImage,
@@ -1116,147 +999,90 @@ export const GeographicSimulationCanvas: React.FC<GeographicSimulationCanvasProp
     ymin,
   ]);
 
-  // Handle Mouse Events for Hover and Feature Selection
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  useEffect(() => { drawRef.current = drawScene; }, [drawScene]);
+  useEffect(() => { drawScene(); }, [drawScene]);
+  // Decoupled animation / live-depth polling: redraws canvas via ref without React re-renders.
+  useEffect(() => {
+    if (!waterDepthRef && !(activeLayers.vectors && activeLayers.water)) return;
+    const id = setInterval(() => {
+      flowPhaseRef.current = (flowPhaseRef.current + 0.15) % 1;
+      const d = waterDepthRef?.current ?? null;
+      if (d && d !== lastPolledDepthRef.current) { lastPolledDepthRef.current = d; drawRef.current?.(); }
+      else if (activeLayers.vectors && activeLayers.water && viewMode === 'standard') drawRef.current?.();
+    }, 120);
+    return () => clearInterval(id);
+  }, [waterDepthRef, activeLayers.vectors, activeLayers.water, viewMode]);
 
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
+  const updateViewport = useCallback((next: ViewportTransform) => {
+    viewportRef.current = next;
+    if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(next.zoom * 100)}%`;
+    drawRef.current?.();
+  }, []);
+  const zoomBy = useCallback((factor: number) => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const rect = canvas.getBoundingClientRect(); const layout = layoutRef.current ?? computeMapLayout(rect.width, rect.height, nx);
+    updateViewport(zoomAtPoint(viewportRef.current, factor, layout.originX + layout.displaySize / 2, layout.originY + layout.displaySize / 2, layout));
+  }, [nx, updateViewport]);
+  // Canvas-scoped wheel zoom: non-passive so the page never zooms/scrolls.
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas || !interactiveViewport) return;
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); const rect = canvas.getBoundingClientRect(); const layout = computeMapLayout(rect.width, rect.height, nx); updateViewport(zoomAtPoint(viewportRef.current, e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - rect.left, e.clientY - rect.top, layout)); };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [nx, interactiveViewport, updateViewport]);
 
-    const width = rect.width;
-    const height = rect.height;
-    const padding = 28;
-    const availableWidth = width - padding * 2;
-    const availableHeight = height - padding * 2;
-    const displaySize = Math.max(100, Math.min(availableWidth, availableHeight));
-
-    const originX = Math.floor((width - displaySize) / 2);
-    const originY = Math.floor((height - displaySize) / 2);
-    const cellSize = displaySize / nx;
-
-    const relX = clientX - originX;
-    const relY = clientY - originY;
-
-    if (relX >= 0 && relX < displaySize && relY >= 0 && relY < displaySize) {
-      const col = Math.floor(relX / cellSize);
-      const row = Math.floor(relY / cellSize);
-      if (row >= 0 && row < ny && col >= 0 && col < nx) {
-        setInternalHover({ row, col });
-        const info = getCellInfo(row, col);
-        if (onCellHover) onCellHover(info);
-        return;
-      }
+  // Handle Mouse Events for Hover and Feature Selection (inverse mapping via mapViewport)
+  const layoutFromEvent = (e: { clientX: number; clientY: number }) => {
+    const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
+    const layout = computeMapLayout(rect.width, rect.height, nx);
+    return { rect, layout, x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+  const handleMouseMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (dragRef.current) {
+      const dx = e.clientX - dragRef.current.x, dy = e.clientY - dragRef.current.y;
+      if (Math.hypot(dx, dy) > 4) dragRef.current.moved = true;
+      if (dragRef.current.moved) { updateViewport({ ...viewportRef.current, panX: dragRef.current.panX + dx, panY: dragRef.current.panY + dy }); return; }
     }
-
-    setInternalHover(null);
-    if (onCellHover) onCellHover(null);
+    const { layout, x, y } = layoutFromEvent(e);
+    const g = screenToGrid(x, y, layout, viewportRef.current, nx, ny);
+    if (g) { hoverRef.current = { row: g.row, col: g.col }; drawRef.current?.(); onCellHover?.(getCellInfo(g.row, g.col)); return; }
+    hoverRef.current = null; drawRef.current?.(); onCellHover?.(null);
   };
-
-  const handleMouseLeave = () => {
-    setInternalHover(null);
-    if (onCellHover) onCellHover(null);
-  };
-
+  const handleMouseLeave = () => { hoverRef.current = null; drawRef.current?.(); onCellHover?.(null); };
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
-
-    const width = rect.width;
-    const height = rect.height;
-    const padding = 28;
-    const availableWidth = width - padding * 2;
-    const availableHeight = height - padding * 2;
-    const displaySize = Math.max(100, Math.min(availableWidth, availableHeight));
-
-    const originX = Math.floor((width - displaySize) / 2);
-    const originY = Math.floor((height - displaySize) / 2);
-    const cellSize = displaySize / nx;
-
-    const relX = clientX - originX;
-    const relY = clientY - originY;
-
-    if (relX >= 0 && relX < displaySize && relY >= 0 && relY < displaySize) {
-      // 1. Check if clicked near a staged work order target
-      if (stagedWorkOrders && stagedWorkOrders.length > 0) {
-        for (const wo of stagedWorkOrders) {
-          const [r, c] = wo.targetLocation.gridCell;
-          const woPx = (c + 0.5) * cellSize;
-          const woPy = (r + 0.5) * cellSize;
-          if (Math.hypot(relX - woPx, relY - woPy) <= 18) {
-            if (onSelectWorkOrder) onSelectWorkOrder(wo);
-            const info = getCellInfo(r, c);
-            if (onCellClick) onCellClick(info);
-            return;
-          }
-        }
-      }
-
-      // 2. Check if clicked near a hospital facility
-      for (const fac of dataset.criticalFacilities) {
-        const facPx = (fac.gridCell[1] + 0.5) * cellSize;
-        const facPy = (fac.gridCell[0] + 0.5) * cellSize;
-        if (Math.hypot(relX - facPx, relY - facPy) <= 15) {
-          if (onSelectFacility) onSelectFacility(fac);
-          const info = getCellInfo(fac.gridCell[0], fac.gridCell[1]);
-          if (onCellClick) onCellClick(info);
-          return;
-        }
-      }
-
-      // 2. Check if clicked near a road corridor
-      for (const road of dataset.criticalRoads) {
-        for (let i = 0; i < road.gridCells.length - 1; i++) {
-          const [r1, c1] = road.gridCells[i];
-          const [r2, c2] = road.gridCells[i + 1];
-          const p1x = (c1 + 0.5) * cellSize;
-          const p1y = (r1 + 0.5) * cellSize;
-          const p2x = (c2 + 0.5) * cellSize;
-          const p2y = (r2 + 0.5) * cellSize;
-
-          // Distance from point to line segment
-          const l2 = Math.hypot(p2x - p1x, p2y - p1y) ** 2;
-          let t = l2 === 0 ? 0 : ((relX - p1x) * (p2x - p1x) + (relY - p1y) * (p2y - p1y)) / l2;
-          t = Math.max(0, Math.min(1, t));
-          const projX = p1x + t * (p2x - p1x);
-          const projY = p1y + t * (p2y - p1y);
-          if (Math.hypot(relX - projX, relY - projY) <= 8) {
-            if (onSelectRoad) onSelectRoad(road);
-            const midRow = Math.round(r1 + t * (r2 - r1));
-            const midCol = Math.round(c1 + t * (c2 - c1));
-            const info = getCellInfo(midRow, midCol);
-            if (onCellClick) onCellClick(info);
-            return;
-          }
-        }
-      }
-
-      // 3. Fallback: Cell click
-      const col = Math.floor(relX / cellSize);
-      const row = Math.floor(relY / cellSize);
-      if (row >= 0 && row < ny && col >= 0 && col < nx) {
-        if (onSelectRoad) onSelectRoad(null);
-        if (onSelectFacility) onSelectFacility(null);
-        const info = getCellInfo(row, col);
-        if (onCellClick) onCellClick(info);
-      }
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    const { layout, x, y } = layoutFromEvent(e); const view = viewportRef.current; const cs = viewCellSize(layout, view);
+    const g = screenToGrid(x, y, layout, view, nx, ny); if (!g) return;
+    for (const wo of stagedWorkOrders ?? []) { const spt = gridToScreen(wo.targetLocation.gridCell[0], wo.targetLocation.gridCell[1], layout, view); if (Math.hypot(x - spt.x, y - spt.y) <= Math.max(18, cs)) { onSelectWorkOrder?.(wo); onCellClick?.(getCellInfo(wo.targetLocation.gridCell[0], wo.targetLocation.gridCell[1])); return; } }
+    for (const fac of dataset.criticalFacilities) { const spt = gridToScreen(fac.gridCell[0], fac.gridCell[1], layout, view); if (Math.hypot(x - spt.x, y - spt.y) <= Math.max(15, cs * 0.8)) { onSelectFacility?.(fac); onCellClick?.(getCellInfo(fac.gridCell[0], fac.gridCell[1])); return; } }
+    for (const road of dataset.criticalRoads) for (let i = 0; i < road.gridCells.length - 1; i++) {
+      const a = gridToScreen(road.gridCells[i][0], road.gridCells[i][1], layout, view), b = gridToScreen(road.gridCells[i + 1][0], road.gridCells[i + 1][1], layout, view);
+      const l2 = Math.hypot(b.x - a.x, b.y - a.y) ** 2; let t = l2 === 0 ? 0 : ((x - a.x) * (b.x - a.x) + (y - a.y) * (b.y - a.y)) / l2; t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(x - (a.x + t * (b.x - a.x)), y - (a.y + t * (b.y - a.y))) <= Math.max(8, cs * 0.5)) { onSelectRoad?.(road); onCellClick?.(getCellInfo(Math.round(road.gridCells[i][0] + t * (road.gridCells[i + 1][0] - road.gridCells[i][0])), Math.round(road.gridCells[i][1] + t * (road.gridCells[i + 1][1] - road.gridCells[i][1])))); return; }
     }
+    onSelectRoad?.(null); onSelectFacility?.(null); onCellClick?.(getCellInfo(g.row, g.col));
   };
 
   return (
     <div ref={containerRef} className={`relative w-full h-full ${className}`}>
       <canvas
         ref={canvasRef}
-        onMouseMove={handleMouseMove}
+        onPointerDown={(e) => { if (interactiveViewport && e.button === 0) { dragRef.current = { x: e.clientX, y: e.clientY, panX: viewportRef.current.panX, panY: viewportRef.current.panY, moved: false }; e.currentTarget.setPointerCapture(e.pointerId); } }}
+        onPointerMove={handleMouseMove}
+        onPointerUp={() => { if (dragRef.current?.moved) suppressClickRef.current = true; dragRef.current = null; }}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
-        className="w-full h-full cursor-crosshair block"
+        className={`w-full h-full block touch-none ${interactiveViewport ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'}`}
       />
+      {showViewportControls && interactiveViewport && (
+        <div className="absolute right-2 top-2 z-30 flex items-center gap-1 bg-onyx-950/90 border border-onyx-700 rounded px-1.5 py-1 text-[10px] font-mono">
+          <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1.3)} className="px-2 py-0.5 rounded bg-onyx-800 text-white font-bold">+</button>
+          <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.3)} className="px-2 py-0.5 rounded bg-onyx-800 text-white font-bold">−</button>
+          <span ref={zoomLabelRef} className="text-storm-300 w-9 text-center">100%</span>
+          <button type="button" onClick={() => updateViewport(identityViewport())} className="px-2 py-0.5 rounded bg-onyx-800 text-storm-100">Reset View</button>
+        </div>
+      )}
+      {interactiveViewport && <div className="absolute right-2 bottom-2 z-20 pointer-events-none text-[9px] font-mono text-storm-400 bg-onyx-950/70 rounded px-1.5 py-0.5">Scroll to zoom · drag to pan</div>}
     </div>
   );
 };

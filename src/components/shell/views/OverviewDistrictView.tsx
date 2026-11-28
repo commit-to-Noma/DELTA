@@ -31,6 +31,7 @@ import {
   CellHoverInfo
 } from '../../simulation/GeographicSimulationCanvas';
 import { CanvasLayerDock } from '../../simulation/CanvasLayerDock';
+import { MapLegend } from '../../simulation/MapLegend';
 
 interface OverviewDistrictViewProps {
   onNavigateToSimulation?: () => void;
@@ -219,6 +220,7 @@ export const OverviewDistrictView: React.FC<OverviewDistrictViewProps> = ({
               )}
             </div>
           </div>
+          {canvasLayers.legend !== false && <MapLegend viewMode="standard" />}
         </div>
 
         {/* Right Contextual Scenario & Infrastructure Rail (4 / 12 cols) */}

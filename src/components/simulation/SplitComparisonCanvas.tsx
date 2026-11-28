@@ -207,6 +207,7 @@ export const SplitComparisonCanvas: React.FC<SplitComparisonCanvasProps> = ({
             </div>
             <div className="flex-1 relative min-h-[340px]">
               <GeographicSimulationCanvas
+                showViewportControls={false} interactiveViewport={false}
                 dataset={dataset}
                 waterDepth={baselineWaterDepth}
                 viewMode="standard"
@@ -232,6 +233,7 @@ export const SplitComparisonCanvas: React.FC<SplitComparisonCanvasProps> = ({
             </div>
             <div className="flex-1 relative min-h-[340px]">
               <GeographicSimulationCanvas
+                showViewportControls={false} interactiveViewport={false}
                 dataset={dataset}
                 waterDepth={planWaterDepth}
                 baselineWaterDepth={baselineWaterDepth}
@@ -258,6 +260,7 @@ export const SplitComparisonCanvas: React.FC<SplitComparisonCanvasProps> = ({
             {/* Base Layer: Selected Intervention Plan (Full width, visible on right side of curtain) */}
             <div className="absolute inset-0">
               <GeographicSimulationCanvas
+                showViewportControls={false} interactiveViewport={false}
                 dataset={dataset}
                 waterDepth={planWaterDepth}
                 baselineWaterDepth={baselineWaterDepth}
@@ -281,6 +284,7 @@ export const SplitComparisonCanvas: React.FC<SplitComparisonCanvasProps> = ({
               style={{ clipPath: `inset(0 ${100 - curtainPercent}% 0 0)` }}
             >
               <GeographicSimulationCanvas
+                showViewportControls={false} interactiveViewport={false}
                 dataset={dataset}
                 waterDepth={baselineWaterDepth}
                 viewMode="standard"
@@ -326,6 +330,7 @@ export const SplitComparisonCanvas: React.FC<SplitComparisonCanvasProps> = ({
       {comparisonMode === 'delta' && (
         <div className="relative flex-1 min-h-[430px] bg-onyx-950 rounded border border-onyx-800 overflow-hidden">
           <GeographicSimulationCanvas
+                showViewportControls={false} interactiveViewport={false}
             dataset={dataset}
             waterDepth={planWaterDepth}
             baselineWaterDepth={baselineWaterDepth}

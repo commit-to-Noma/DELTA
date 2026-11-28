@@ -52,6 +52,7 @@ import {
   CellHoverInfo
 } from '../../simulation/GeographicSimulationCanvas';
 import { CanvasLayerDock } from '../../simulation/CanvasLayerDock';
+import { MapLegend } from '../../simulation/MapLegend';
 
 export const FloodSimulationView: React.FC = () => {
   const {
@@ -115,8 +116,25 @@ export const FloodSimulationView: React.FC = () => {
   const simStateRef = useRef<SimulationState>(simState);
   simStateRef.current = simState;
 
+  // Render decoupling: solver advances in refs; canvas polls liveDepthRef, HUD state updates ~6 Hz.
+  const liveDepthRef = useRef<Float64Array>(simState.waterDepth);
+  const hudRef = useRef({ elapsed: 0, peak: 0, rate: 0, storage: 0, rain: 0, drainage: 0, relError: 0 });
+  const [hud, setHud] = useState(hudRef.current);
+  const lastHudAtRef = useRef(0);
+  const hoverAtRef = useRef(0);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncHud = useCallback((state: SimulationState, force = false) => {
+    const now = performance.now(); if (!force && now - lastHudAtRef.current < 160) return; lastHudAtRef.current = now;
+    let peak = 0; for (let i = 0; i < state.waterDepth.length; i++) if (state.waterDepth[i] > peak) peak = state.waterDepth[i];
+    hudRef.current = { elapsed: state.totalTimeSeconds, peak, rate: getRainfallRateAtElapsed(activeProfile, state.totalTimeSeconds), storage: state.accounting.currentStorageM3, rain: state.accounting.cumulativeRainfallM3, drainage: state.accounting.cumulativeDrainageM3, relError: state.accounting.relativeError };
+    setHud(hudRef.current);
+  }, [activeProfile]);
+  const handleHoverThrottled = useCallback((info: CellHoverInfo | null) => {
+    const now = Date.now(); if (now - hoverAtRef.current >= 100) { hoverAtRef.current = now; setHoveredCell(info); return; }
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverTimerRef.current = setTimeout(() => setHoveredCell(info), 100);
+  }, []);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(2);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [saveTelemetryStatus, setSaveTelemetryStatus] = useState<string | null>(null);
 
   // Reset live playback cleanly whenever active profile or disruption configuration changes
@@ -124,7 +142,8 @@ export const FloodSimulationView: React.FC = () => {
     setIsPlaying(false);
     const fresh = createHydraulicState(liveHydraulicConfig);
     setSimState(fresh);
-    simStateRef.current = fresh;
+    simStateRef.current = fresh; liveDepthRef.current = fresh.waterDepth; syncHud(fresh, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveHydraulicConfig, activeProfileId]);
 
   // Ensure spatial disruption comparison is computed
@@ -146,9 +165,9 @@ export const FloodSimulationView: React.FC = () => {
           rainfallRateMmPerHour: rate
         });
       }
-      setSimState(state);
+      simStateRef.current = state; liveDepthRef.current = state.waterDepth; syncHud(state);
     },
-    [activeProfile]
+    [activeProfile, syncHud]
   );
 
   useEffect(() => {
@@ -161,7 +180,8 @@ export const FloodSimulationView: React.FC = () => {
 
   const handleResetPlayback = () => {
     setIsPlaying(false);
-    setSimState(createHydraulicState(liveHydraulicConfig));
+    const fresh = createHydraulicState(liveHydraulicConfig);
+    setSimState(fresh); simStateRef.current = fresh; liveDepthRef.current = fresh.waterDepth; syncHud(fresh, true);
   };
 
   const handleSaveSnapshot = async () => {
@@ -179,14 +199,12 @@ export const FloodSimulationView: React.FC = () => {
         profileId: activeProfile.id,
         activeDisruptionIds,
         elapsedSeconds:
-          stageMode === 'disruption-analysis'
-            ? activeProfile.durationSeconds
-            : simState.totalTimeSeconds,
+          stageMode === 'disruption-analysis' ? activeProfile.durationSeconds : simStateRef.current.totalTimeSeconds,
         peakDepthM: Math.round(peak * 1000) / 1000,
         currentStorageM3:
           stageMode === 'disruption-analysis' && disruptionComparison
             ? disruptionComparison.disrupted.currentStorageM3
-            : Math.round(simState.accounting.currentStorageM3),
+            : Math.round(simStateRef.current.accounting.currentStorageM3),
         timestamp: new Date().toISOString()
       });
       setSaveTelemetryStatus(res?.success ? 'Snapshot saved' : 'Saved locally');
@@ -218,19 +236,24 @@ export const FloodSimulationView: React.FC = () => {
   const inspectorCell = hoveredCell || clickedCell;
 
   // Compute live peak depth when in playback mode
-  const livePeakDepthM = useMemo(() => {
-    let maxD = 0;
-    for (let i = 0; i < simState.waterDepth.length; i++) {
-      if (simState.waterDepth[i] > maxD) maxD = simState.waterDepth[i];
-    }
-    return maxD;
-  }, [simState.waterDepth]);
-
-  const currentLiveRate = getRainfallRateAtElapsed(activeProfile, simState.totalTimeSeconds);
+  const livePeakDepthM = hud.peak;
+  const currentLiveRate = hud.rate;
 
   return (
     <div className="flex flex-col gap-3 h-full">
       <StageIntro subtitle="Pick a storm and tick any blocked drains — the map shows where the water goes. Try the sandbox to test your own pumps and barriers." />
+      {/* Prominent Stage 2 simulation toolbar (Phase 1) */}
+      <div className="bg-onyx-900 border border-emerald-800/60 rounded px-3.5 py-2.5 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={() => { setStageMode('live-playback'); setIsPlaying((p) => !p); }} className={`px-4 py-2 rounded text-sm font-mono font-bold text-white ${isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-700 hover:bg-emerald-600'}`}>{isPlaying ? '⏸ Pause' : '▶ Run Simulation'}</button>
+        <div className="flex items-center gap-1" role="group" aria-label="Simulation speed">
+          <button type="button" aria-pressed={playbackSpeed === 1} onClick={() => setPlaybackSpeed(1)} className={`px-2.5 py-1.5 rounded text-xs font-mono font-bold ${playbackSpeed === 1 ? 'bg-cyan-700 text-white' : 'bg-onyx-950 text-storm-300 border border-onyx-700'}`}>1×</button>
+          <button type="button" aria-pressed={playbackSpeed === 5} onClick={() => setPlaybackSpeed(5)} className={`px-2.5 py-1.5 rounded text-xs font-mono font-bold ${playbackSpeed === 5 ? 'bg-cyan-700 text-white' : 'bg-onyx-950 text-storm-300 border border-onyx-700'}`}>5×</button>
+          <button type="button" aria-pressed={playbackSpeed === 20} onClick={() => setPlaybackSpeed(20)} className={`px-2.5 py-1.5 rounded text-xs font-mono font-bold ${playbackSpeed === 20 ? 'bg-cyan-700 text-white' : 'bg-onyx-950 text-storm-300 border border-onyx-700'}`}>20×</button>
+        </div>
+        <button type="button" onClick={handleResetPlayback} className="inline-flex items-center gap-1.5 px-3 py-2 rounded bg-onyx-950 hover:bg-onyx-800 border border-onyx-600 text-xs font-mono font-bold text-storm-100"><RotateCcw className="w-3.5 h-3.5" />Reset</button>
+        <span className="text-[11px] font-mono text-cyan-300">T+{Math.round(hud.elapsed)}s / {activeProfile.durationSeconds}s · {currentLiveRate.toFixed(1)} mm/h · Peak {(livePeakDepthM * 100).toFixed(1)} cm</span>
+        <span className="text-[11px] text-storm-400">Stage 2 = set storm + disruptions · Stage 3 = auto-compare plans</span>
+      </div>
       {/* Compact Command Controls Bar */}
       <div className="bg-onyx-900 border border-onyx-800 rounded px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
@@ -356,7 +379,7 @@ export const FloodSimulationView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => advanceSimulation(1)}
+                  onClick={() => { advanceSimulation(1); syncHud(simStateRef.current, true); }}
                   className="p-1 rounded bg-onyx-800 hover:bg-onyx-700 text-storm-200"
                   title="Step +10s"
                 >
@@ -377,12 +400,10 @@ export const FloodSimulationView: React.FC = () => {
                   className="bg-onyx-900 border border-onyx-700 rounded px-1.5 py-0.5 text-[10px] text-storm-200"
                 >
                   <option value={1}>1x</option>
-                  <option value={2}>2x</option>
                   <option value={5}>5x</option>
+                  <option value={20}>20x</option>
                 </select>
-                <span className="text-cyan-300 pl-1">
-                  T+{Math.round(simState.totalTimeSeconds)}s / {activeProfile.durationSeconds}s
-                </span>
+                <span className="text-cyan-300 pl-1">T+{Math.round(hud.elapsed)}s / {activeProfile.durationSeconds}s</span>
                 <span className="text-storm-400">({currentLiveRate.toFixed(1)} mm/h)</span>
               </div>
             )}
@@ -410,7 +431,8 @@ export const FloodSimulationView: React.FC = () => {
               selectedFacilityId={selectedFacilityId}
               stagedWorkOrders={workOrders}
               customActions={customActions}
-              onCellHover={setHoveredCell}
+              waterDepthRef={stageMode === 'live-playback' ? liveDepthRef : undefined}
+              onCellHover={handleHoverThrottled}
               onCellClick={(info) => {
                 setClickedCell(info);
                 setSelectedCell({ row: info.row, col: info.col });
@@ -461,6 +483,7 @@ export const FloodSimulationView: React.FC = () => {
               )}
             </div>
           </div>
+          {canvasLayers.legend !== false && <MapLegend viewMode={effectiveCanvasViewMode} />}
         </div>
 
         {/* Right Contextual Disruption Controls & Telemetry Rail */}
@@ -666,13 +689,13 @@ export const FloodSimulationView: React.FC = () => {
                   <Activity className="w-3.5 h-3.5 text-cyan-400" />
                   Live Progression Telemetry
                 </span>
-                <span className="text-cyan-300">T+{Math.round(simState.totalTimeSeconds)}s</span>
+                <span className="text-cyan-300">T+{Math.round(hud.elapsed)}s</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
                   <span className="text-[9px] text-storm-400 uppercase block">Surface Storage</span>
                   <span className="text-white font-bold">
-                    {Math.round(simState.accounting.currentStorageM3).toLocaleString()} m³
+                    {Math.round(hud.storage).toLocaleString()} m³
                   </span>
                 </div>
                 <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
@@ -682,13 +705,13 @@ export const FloodSimulationView: React.FC = () => {
                 <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
                   <span className="text-[9px] text-storm-400 uppercase block">Cumulative Rain</span>
                   <span className="text-storm-200 font-bold">
-                    {Math.round(simState.accounting.cumulativeRainfallM3).toLocaleString()} m³
+                    {Math.round(hud.rain).toLocaleString()} m³
                   </span>
                 </div>
                 <div className="bg-onyx-950 border border-onyx-800 rounded p-2">
                   <span className="text-[9px] text-storm-400 uppercase block">Inlet Drainage</span>
                   <span className="text-emerald-300 font-bold">
-                    {Math.round(simState.accounting.cumulativeDrainageM3).toLocaleString()} m³
+                    {Math.round(hud.drainage).toLocaleString()} m³
                   </span>
                 </div>
               </div>
@@ -739,7 +762,7 @@ export const FloodSimulationView: React.FC = () => {
                   {(
                     (stageMode === 'disruption-analysis' && disruptionComparison
                       ? disruptionComparison.disrupted.relativeConservationError
-                      : simState.accounting.relativeError) * 100
+                      : hud.relError) * 100
                   ).toExponential(2)}
                   %
                 </div>
