@@ -53,7 +53,7 @@
 | `npm run build` (`tsc -b && vite build`) | ✅ Pass (2403 modules, 0 chunk warnings) |
 | `forge lint` | ✅ "No issues found." (0 errors, 0 warnings) |
 
-Deploy: `forge deploy` (development) + Jira/Confluence development upgrades on one-atlas-xttm.atlassian.net — see git history / deploy log below in this file's Phase 2 note. Production promotion only after visual inspection on development.
+Deploy (2026-11-28): `forge deploy -e development` ✅ (app v5.2.0, "Runs on Atlassian" eligible). Development upgrades for Jira + Confluence on one-atlas-xttm.atlassian.net run explicitly — both already at latest major v5 ("Up-to-date"), so the new UI is live for visual inspection. Production promotion only after that visual check passes.
 
 
 ### Phase 1 (run in the Phase 1 worktree, 2026-11-28)
