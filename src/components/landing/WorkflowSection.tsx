@@ -60,7 +60,7 @@ export const WorkflowSection: React.FC = () => {
       title: 'DISPATCH',
       actor: 'Jira Service Management',
       badge: 'CLOSED LOOP',
-      desc: 'Automatically generate and route actionable operational tasks to municipal field crews and utility teams in Jira.',
+      desc: 'A human commander triggers dispatch of actionable operational tasks to municipal field crews and utility teams in Jira — never automatic, never without an approved Decision Record.',
       icon: SendHorizontal,
       accent: 'border-cyan-500/40 text-cyan-400 bg-cyan-950/30',
     },
@@ -74,7 +74,7 @@ export const WorkflowSection: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 text-xs font-mono text-safety-orange tracking-widest uppercase mb-2">
               <span className="w-1.5 h-1.5 rounded-full bg-safety-orange" />
-              <span>03 // THE 6-STAGE ENGINE</span>
+              <span>03 // THE 5-STAGE ENGINE + RECORD</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-display font-bold text-storm-50 tracking-tight">
               From Terrain Elevation to Real Work in Jira

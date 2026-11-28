@@ -239,6 +239,9 @@ export const OperationalTicketsView: React.FC = () => {
           <p className="text-storm-300 font-sans">
             Approved hydrodynamic mitigation decisions transition through rigorous operational staging: from <strong>PREPARED DRAFT</strong> to <strong>COMMANDER STAGED</strong> and <strong>JIRA LINKED</strong>. Every operational claim explicitly distinguishes between <em>Source-Verified</em>, <em>Derived</em>, <em>Planning Assumptions</em>, and <em>Unverified</em> content.
           </p>
+          <p className="text-amber-300 font-sans">
+            Demo seed cards (DEC-2026-080/081, e.g. JSM-4902) are illustrative staging examples — they are <strong>not</strong> live Jira tickets. Real work orders appear only after you approve a decision in Step 03 and dispatch.
+          </p>
         </div>
       </div>
 

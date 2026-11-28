@@ -457,7 +457,7 @@ export const InterventionsView: React.FC<InterventionsViewProps> = ({
             <div className="flex-1 min-h-[430px] bg-onyx-950 rounded border border-onyx-800 flex items-center justify-center">
               <div className="flex items-center gap-2.5 text-xs font-mono text-cyan-300">
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Executing identical-storm 2D solver for Baseline, Alpha, Beta, and Gamma...</span>
+                <span>Executing identical-storm 2D solver for Baseline, Alpha, Beta, and Gamma — first run for a setup can take about a minute; results are cached after that.</span>
               </div>
             </div>
           ) : (

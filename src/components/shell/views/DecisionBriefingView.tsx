@@ -213,7 +213,7 @@ export const DecisionBriefingView: React.FC<DecisionBriefingViewProps> = ({
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-safety-orange hover:bg-orange-600 text-white font-mono text-[11px] font-bold transition-colors"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              Approve Decision → (Step 03)
+              Go to Step 03 to Approve Decision
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}

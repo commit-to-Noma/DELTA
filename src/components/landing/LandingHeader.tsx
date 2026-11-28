@@ -31,7 +31,7 @@ export const LandingHeader: React.FC<LandingHeaderProps> = ({ onEnterApp }) => {
             href="#workflow"
             className="px-3 py-1.5 rounded hover:text-storm-100 hover:bg-onyx-850 transition-colors"
           >
-            03// 6-STAGE ENGINE
+            03// 5-STAGE ENGINE
           </a>
           <a
             href="#technologies"

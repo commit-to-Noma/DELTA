@@ -67,7 +67,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onEnterApp }) => {
               className="flex items-center gap-2 bg-onyx-900/90 hover:bg-onyx-850 text-storm-200 font-mono text-xs px-5 py-3.5 rounded border border-onyx-700 transition-colors shadow-tactical"
             >
               <Activity className="w-4 h-4 text-hydro-500" />
-              <span>EXPLORE 6-STAGE ENGINE</span>
+              <span>EXPLORE 5-STAGE ENGINE</span>
             </a>
           </div>
         </div>

@@ -118,7 +118,7 @@ export const InteractiveFeatureWorkbench: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3 pt-2">
                     <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
                       <div className="font-mono text-[10px] text-storm-400">RESOLUTION</div>
-                      <div className="font-mono text-sm text-storm-100 font-bold">1m DEM Grid</div>
+                      <div className="font-mono text-sm text-storm-100 font-bold">25m DEM Grid (64×64)</div>
                     </div>
                     <div className="bg-onyx-950 p-2.5 rounded border border-onyx-800">
                       <div className="font-mono text-[10px] text-storm-400">WATER BALANCE</div>
@@ -130,7 +130,7 @@ export const InteractiveFeatureWorkbench: React.FC = () => {
                 <div className="lg:col-span-7 bg-onyx-950 p-5 rounded border border-onyx-800/80 font-mono text-xs">
                   <div className="flex items-center justify-between pb-3 border-b border-onyx-800 mb-4 text-storm-400">
                     <span>SECTOR: DELTA-CENTRAL-01</span>
-                    <span>COORDINATES: 42.3601° N, 71.0589° W</span>
+                    <span>COORDINATES: 42.3415° N, 71.1080° W (EPSG:26986)</span>
                   </div>
                   
                   {/* Visual Topographic Grid Illustration */}

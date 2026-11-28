@@ -98,7 +98,7 @@ export const ProblemSolutionSection: React.FC = () => {
               <li className="flex items-start gap-3">
                 <CheckCircle2 className="w-4 h-4 text-safety-orange flex-shrink-0 mt-0.5" />
                 <div>
-                  <strong className="text-storm-100">In-Flight Dynamic Replanning:</strong> Block Drain B live during the storm, and DELTA recalculates water depth across the terrain, adapting its recommendation in seconds.
+                  <strong className="text-storm-100">In-Flight Dynamic Replanning:</strong> Block Drain B live during the storm, and DELTA recalculates water depth across the terrain and adapts its recommendation (first run for a new setup can take about a minute; results are then cached).
                 </div>
               </li>
               <li className="flex items-start gap-3">
