@@ -1,6 +1,8 @@
 # DELTA UX Overhaul — Handover
 
-**Phase 0 commit:** `a9063eb2c89c83fef2dd93f86263c1c765381beb` (`feat(ux): Phase 0 quick wins — dedup nav, plain-English labels, specs drawer, sandbox bounding, Rovo starters`), on top of base `d37231ccaf69c73852e5816b00e17bef715f79ef`. This HANDOVER is committed immediately after that commit; `git log --oneline -2` shows both. Source plan: `docs/competition/ux-overhaul-plan.md` (restored in the Phase 0 commit from the parent session's checkpoint — it was not on `main`).
+**Phase 1 commit:** `a6f228d1bf0a48e833eb5f27aeb4587fbef5822f` (`feat(ux): Phase 1 map zoom/pan, smoothed water, flow arrows, docked legend, decoupled playback`), on top of Phase 0. This HANDOVER update is committed immediately after that commit; `git log --oneline -3` shows both plus Phase 0.
+
+**Phase 0 commit:** `a9063eb2c89c83fef2dd93f86263c1c765381beb` (`feat(ux): Phase 0 quick wins — dedup nav, plain-English labels, specs drawer, sandbox bounding, Rovo starters`), on top of base `d37231ccaf69c73852e5816b00e17bef715f79ef`. Source plan: `docs/competition/ux-overhaul-plan.md` (restored in the Phase 0 commit from the parent session's checkpoint — it was not on `main`).
 
 **Hard rule (all phases):** zero backend/feature regression — presentation, interaction, and performance only. No new districts, no backend/resolver changes, no feature removal. Do **not** run `forge deploy` until the plan's verification gate for that phase says to.
 
@@ -17,13 +19,15 @@
 
 **New files:** `src/components/common/StageIntro.tsx`, `src/components/common/DataModelSpecsDrawer.tsx`, `tests/phase0Ux.test.ts` (4 focused tests). **No Phase 1 or Phase 2 items were touched, and `forge deploy` was not run.**
 
-## Remaining — Phase 1 (Map & performance, 1–2 days, the "wow") — NOT STARTED
+## Completed — Phase 1 (Map & performance)
 
-- [ ] Canvas-scoped wheel zoom (`preventDefault`), drag pan, `+ / − / Reset` controls; **unit test inverse mapping** so sandbox clicks stay exact under transform.
-- [ ] Smooth water: offscreen canvas + bilinear upsampling, translucent depth ramp, wet-edge contour; velocity-scaled animated flow arrows toward corridors.
-- [ ] Legend docked in side panel / bottom strip — never over the map.
-- [ ] Prominent **▶ Run / ⏸ Pause**, **1×/5×/20×**, **Reset** in Stage 2 toolbar; clarify Stage 2 = set storm+disruptions, Stage 3 = auto-compare plans. (Note: a compact Play/Pause/Step/Reset + 1x/2x/5x control already exists in live-playback mode — Phase 1 is about prominence/speeds, not creating it.)
-- [ ] Decouple canvas frames from React renders (refs + ~5–10 Hz HUD updates).
+- [x] **Canvas-scoped wheel zoom / drag pan / controls:** Non-passive `wheel` listener with `preventDefault()` on the canvas only (page never zooms), click-drag pan (4px threshold so clicks still select), `+ / − / Reset View` overlay with zoom %. Pure viewport math in `src/simulation/mapViewport.ts` (`computeMapLayout`, `zoomAtPoint` focal-stable, `screenToGrid`/`gridToScreen`); **unit-tested round-trip inverse mapping** in `tests/phase1Map.test.ts` incl. Brookline culvert cell [17,26] under zoom+pan, so Click-Anywhere Sandbox placement stays exact. Split-comparison canvases keep viewport interaction disabled to stay synchronised.
+- [x] **Smooth water + flow arrows:** Standard depth rendering now rasterises the 64×64 depth field to an offscreen canvas coloured by the soft translucent ramp `waterColorForDepth()` and upscales with `imageSmoothingEnabled = true` (bilinear), plus a wet-edge contour. Flow arrows are velocity-scaled (`flowArrowForGradient`: length/width/head scale with surface-gradient magnitude), dark-outlined for legibility, and animated downstream via a ref-driven phase. Delta (Δh) mode keeps its discrete comparison colours.
+- [x] **Docked legend:** On-canvas legend drawing removed from `GeographicSimulationCanvas`; new HTML `src/components/simulation/MapLegend.tsx` docked in a bottom strip under the map in Stage 1 (`OverviewDistrictView`) and Stage 2 (`FloodSimulationView`), toggled by the existing Legend layer switch — never over hospitals/culverts.
+- [x] **Prominent Stage 2 toolbar:** `▶ Run Simulation` / `⏸ Pause`, `1× / 5× / 20×` speed selector and `Reset` at the very top of Stage 2 (above the mode/rainfall bar), with live T+/rate/peak readout and "Stage 2 = set storm + disruptions · Stage 3 = auto-compare plans" clarifier. The compact in-map transport bar was aligned to the same 1×/5×/20× speeds.
+- [x] **Render decoupling:** Live solver advances in `simStateRef`/`liveDepthRef` without per-tick React renders; `GeographicSimulationCanvas` redraws imperatively via `drawRef` (polls the depth ref + animates flow at ~120ms) and hover/viewport live in refs. Stage 2 HUD metrics (elapsed, peak, rate, storage, rain, drainage) update via throttled `syncHud` (~160ms) and hover telemetry is throttled to 100ms.
+
+**New files:** `src/simulation/mapViewport.ts`, `src/components/simulation/MapLegend.tsx`, `tests/phase1Map.test.ts` (6 tests). **No Phase 2 items were touched, and `forge deploy` was not run.**
 
 ## Remaining — Phase 2 (Scannable decision surfaces, 1 day) — NOT STARTED
 
@@ -32,15 +36,26 @@
 - [ ] Issue Panel: unlinked = compact catchment risk + Link/Open CTAs; linked = decision + metrics + Confluence + dispatch card.
 - [ ] 3-Step Quickstart strip on Stage 1 when no saved run (dismissible): Run Storm → Approve & Publish → Dispatch & Verify Gate.
 
-## Verification (run in the Phase 0 worktree, 2026-11-28)
+## Verification
 
-Per-phase gate from the plan: `npm run lint && npm test && npm run build && forge lint` → push main → `forge deploy` (development) → visual check on one-atlas → only then production. **`forge deploy` was deliberately NOT run (per task instruction).**
+### Phase 1 (run in the Phase 1 worktree, 2026-11-28)
+
+Per-phase gate from the plan: `npm run lint && npm test && npm run build && forge lint` → push main → `forge deploy` (development) → visual check on one-atlas → only then production. **`forge deploy` was deliberately NOT run (per task instruction), so the plan's post-deploy visual check remains outstanding.**
 
 | Command | Result |
 |---|---|
 | `npm run lint` (`tsc --noEmit`) | ✅ Pass (clean; `npm ci` was required first in the fresh worktree) |
-| `npm test` (`vitest run`) | ✅ **247 passed (20 files)** — 243 pre-existing + 4 new `tests/phase0Ux.test.ts` |
-| `npm run build` (`tsc -b && vite build`) | ✅ Pass (2399 modules, `dist/` built) |
-| `forge lint` (Forge CLI 16.0.0) | ✅ "No issues found." |
+| `npm test` (`vitest run`) | ✅ **253 passed (21 files)** — 247 Phase 0 + 6 new `tests/phase1Map.test.ts` |
+| `npm run build` (`tsc -b && vite build`) | ✅ Pass (2401 modules, `dist/` built) |
+| `forge lint` | ✅ "No issues found." |
 
-Target from the plan (243+ tests always green) is met. To resume: start Phase 1 with the canvas zoom/pan item, re-run the four commands above, and only then consider `forge deploy` (development).
+### Phase 0 (2026-11-28)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ Pass |
+| `npm test` | ✅ **247 passed (20 files)** — 243 pre-existing + 4 new `tests/phase0Ux.test.ts` |
+| `npm run build` | ✅ Pass (2399 modules) |
+| `forge lint` | ✅ "No issues found." |
+
+Target from the plan (243+ tests always green) is met and rising (253). To resume: start Phase 2 with the Stage 4 Executive Decision Summary Card, re-run the four commands above, and only then consider `forge deploy` (development) + visual check on one-atlas.
